@@ -156,7 +156,7 @@ impl MemoryProvider for MongoMemoryProvider {
             options.limit = Some(limit as i64);
         }
         if let Some(skip) = skip {
-            options.skip = Some(skip as u64);
+            options.skip = Some(skip);
         }
         if let Some(sort) = sort {
             let sort_doc = sort.into_iter().fold(Document::new(), |mut acc, (k, v)| {

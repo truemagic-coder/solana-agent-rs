@@ -38,8 +38,8 @@ impl PluginManager for DefaultPluginManager {
         Vec::new()
     }
 
-    fn get_plugin(&self, name: &str) -> Option<&Box<dyn Plugin>> {
-        self.plugins.get(name)
+    fn get_plugin(&self, name: &str) -> Option<&dyn Plugin> {
+        self.plugins.get(name).map(|p| p.as_ref())
     }
 
     fn list_plugins(&self) -> Vec<Value> {

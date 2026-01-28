@@ -1747,7 +1747,7 @@ async fn openai_provider_variants_and_agent_process() {
     for format in formats {
         let _ = speech_provider.tts("hi", "alloy", format).await.unwrap();
     }
-    speech_mock.assert_hits(voices.len() as usize + formats.len() as usize);
+    speech_mock.assert_hits(voices.len() + formats.len());
 
     let agent_server = MockServer::start_async().await;
     let agent_mock = agent_server

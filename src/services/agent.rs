@@ -139,6 +139,7 @@ impl AgentService {
         Ok(processed_output)
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub async fn generate_response_with_images(
         &self,
         agent_name: &str,

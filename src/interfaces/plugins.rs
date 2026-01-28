@@ -23,7 +23,7 @@ pub trait Plugin: Send + Sync {
 pub trait PluginManager: Send + Sync {
     fn register_plugin(&mut self, plugin: Box<dyn Plugin>) -> bool;
     fn load_plugins(&mut self) -> Vec<String>;
-    fn get_plugin(&self, name: &str) -> Option<&Box<dyn Plugin>>;
+    fn get_plugin(&self, name: &str) -> Option<&dyn Plugin>;
     fn list_plugins(&self) -> Vec<serde_json::Value>;
     fn configure(&mut self, config: Value);
 }
