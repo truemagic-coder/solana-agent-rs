@@ -12,7 +12,10 @@ pub enum SolanaAgentError {
     Runtime(String),
 }
 
-pub type Result<T> = std::result::Result<T, SolanaAgentError>; pub fn result_ok() -> Result<()> { Ok(()) }
+pub type Result<T> = std::result::Result<T, SolanaAgentError>;
+pub fn result_ok() -> Result<()> {
+    Ok(())
+}
 
 #[cfg(test)]
 pub fn coverage_probe() -> Result<()> {

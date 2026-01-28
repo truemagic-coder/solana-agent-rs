@@ -166,13 +166,7 @@ impl AgentService {
 
         let output = self
             .llm_provider
-            .generate_text_with_images(
-                &full_prompt,
-                images,
-                &system_prompt,
-                detail,
-                None,
-            )
+            .generate_text_with_images(&full_prompt, images, &system_prompt, detail, None)
             .await?;
 
         let mut processed_output = output;
@@ -207,12 +201,7 @@ impl AgentService {
         full_prompt.push_str(&format!("\n\nUSER IDENTIFIER: {}", user_id));
 
         self.llm_provider
-            .parse_structured_output(
-                &full_prompt,
-                &system_prompt,
-                json_schema,
-                None,
-            )
+            .parse_structured_output(&full_prompt, &system_prompt, json_schema, None)
             .await
     }
 
@@ -266,7 +255,9 @@ impl AgentService {
                 return Ok(last_text);
             }
 
-            let results = self.execute_tool_calls(&response.tool_calls, &tools).await?;
+            let results = self
+                .execute_tool_calls(&response.tool_calls, &tools)
+                .await?;
             let serialized = serde_json::to_string_pretty(&results)
                 .map_err(|e| SolanaAgentError::Serialization(e.to_string()))?;
             prompt.push_str("\n\nTOOL_RESULTS:\n");

@@ -3,8 +3,8 @@ use std::sync::Arc;
 
 use tokio::sync::RwLock;
 
-use crate::interfaces::plugins::Tool;
 use crate::error::{Result, SolanaAgentError};
+use crate::interfaces::plugins::Tool;
 
 #[derive(Default)]
 pub struct ToolRegistry {

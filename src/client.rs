@@ -30,7 +30,8 @@ impl SolanaAgent {
         message: &'a str,
         prompt: Option<&'a str>,
     ) -> BoxStream<'a, Result<String>> {
-        self.query_service.process_text_stream(user_id, message, prompt)
+        self.query_service
+            .process_text_stream(user_id, message, prompt)
     }
 
     pub async fn process(

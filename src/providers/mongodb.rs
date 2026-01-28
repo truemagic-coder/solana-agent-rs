@@ -32,8 +32,8 @@ impl MongoMemoryProvider {
             .await
             .map_err(|e| SolanaAgentError::Runtime(e.to_string()))?;
         options.app_name = Some("solana-agent".to_string());
-        let client = Client::with_options(options)
-            .map_err(|e| SolanaAgentError::Runtime(e.to_string()))?;
+        let client =
+            Client::with_options(options).map_err(|e| SolanaAgentError::Runtime(e.to_string()))?;
         let db = client.database(database);
         let messages = db.collection::<MessageDoc>(collection);
         let captures = db.collection::<Document>("captures");
@@ -159,18 +159,15 @@ impl MemoryProvider for MongoMemoryProvider {
             options.skip = Some(skip as u64);
         }
         if let Some(sort) = sort {
-            let sort_doc = sort
-                .into_iter()
-                .fold(Document::new(), |mut acc, (k, v)| {
-                    acc.insert(k, v);
-                    acc
-                });
+            let sort_doc = sort.into_iter().fold(Document::new(), |mut acc, (k, v)| {
+                acc.insert(k, v);
+                acc
+            });
             options.sort = Some(sort_doc);
         }
 
         let query_doc: Document = mongodb::bson::from_bson(
-            mongodb::bson::to_bson(&query)
-                .map_err(|e| SolanaAgentError::Runtime(e.to_string()))?,
+            mongodb::bson::to_bson(&query).map_err(|e| SolanaAgentError::Runtime(e.to_string()))?,
         )
         .map_err(|e| SolanaAgentError::Runtime(e.to_string()))?;
 
@@ -183,8 +180,8 @@ impl MemoryProvider for MongoMemoryProvider {
         {
             let bson = mongodb::bson::to_bson(&doc)
                 .map_err(|e| SolanaAgentError::Runtime(e.to_string()))?;
-            let value = serde_json::to_value(bson)
-                .map_err(|e| SolanaAgentError::Runtime(e.to_string()))?;
+            let value =
+                serde_json::to_value(bson).map_err(|e| SolanaAgentError::Runtime(e.to_string()))?;
             results.push(value);
         }
         Ok(results)
@@ -193,8 +190,7 @@ impl MemoryProvider for MongoMemoryProvider {
     fn count_documents(&self, collection: &str, query: serde_json::Value) -> Result<u64> {
         let coll = self.collection(collection);
         let query_doc: Document = mongodb::bson::from_bson(
-            mongodb::bson::to_bson(&query)
-                .map_err(|e| SolanaAgentError::Runtime(e.to_string()))?,
+            mongodb::bson::to_bson(&query).map_err(|e| SolanaAgentError::Runtime(e.to_string()))?,
         )
         .map_err(|e| SolanaAgentError::Runtime(e.to_string()))?;
         let count = futures::executor::block_on(coll.count_documents(query_doc, None))
@@ -216,11 +212,16 @@ impl MemoryProvider for MongoMemoryProvider {
         if let Some(agent) = agent_name {
             doc.insert("agent_name", agent);
         }
-        doc.insert("data", mongodb::bson::to_bson(&data)
-            .map_err(|e| SolanaAgentError::Runtime(e.to_string()))?);
+        doc.insert(
+            "data",
+            mongodb::bson::to_bson(&data).map_err(|e| SolanaAgentError::Runtime(e.to_string()))?,
+        );
         if let Some(schema) = schema {
-            doc.insert("schema", mongodb::bson::to_bson(&schema)
-                .map_err(|e| SolanaAgentError::Runtime(e.to_string()))?);
+            doc.insert(
+                "schema",
+                mongodb::bson::to_bson(&schema)
+                    .map_err(|e| SolanaAgentError::Runtime(e.to_string()))?,
+            );
         }
         doc.insert("timestamp", Self::now_ts()?);
 
@@ -229,9 +230,6 @@ impl MemoryProvider for MongoMemoryProvider {
             .insert_one(doc, None)
             .await
             .map_err(|e| SolanaAgentError::Runtime(e.to_string()))?;
-        Ok(result
-            .inserted_id
-            .as_object_id()
-            .map(|id| id.to_hex()))
+        Ok(result.inserted_id.as_object_id().map(|id| id.to_hex()))
     }
 }

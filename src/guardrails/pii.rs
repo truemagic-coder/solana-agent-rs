@@ -21,8 +21,7 @@ impl PiiGuardrail {
             .and_then(|v| v.as_str())
             .unwrap_or("[REDACTED]")
             .to_string();
-        let email_re = Regex::new(r"(?i)\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b")
-            .unwrap();
+        let email_re = Regex::new(r"(?i)\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b").unwrap();
         let phone_re = Regex::new(r"\b\+?[0-9][0-9\-()\s]{6,}[0-9]\b").unwrap();
         Self {
             replacement,

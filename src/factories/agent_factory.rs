@@ -93,9 +93,7 @@ impl SolanaAgentFactory {
             if let Some(_mongo) = config.mongo {
                 #[cfg(feature = "mongo")]
                 {
-                    let collection = _mongo
-                        .collection
-                        .unwrap_or_else(|| "messages".to_string());
+                    let collection = _mongo.collection.unwrap_or_else(|| "messages".to_string());
                     Arc::new(
                         MongoMemoryProvider::new(
                             &_mongo.connection_string,

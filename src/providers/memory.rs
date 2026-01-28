@@ -76,7 +76,9 @@ impl MemoryProvider for InMemoryMemoryProvider {
         let filtered = docs
             .into_iter()
             .filter(|doc| {
-                let Some(obj) = doc.as_object() else { return false; };
+                let Some(obj) = doc.as_object() else {
+                    return false;
+                };
                 query_obj.iter().all(|(k, v)| obj.get(k) == Some(v))
             })
             .collect();
@@ -113,10 +115,7 @@ impl MemoryProvider for InMemoryMemoryProvider {
         }
 
         let mut guard = self.collections.write().await;
-        guard
-            .entry("captures".to_string())
-            .or_default()
-            .push(doc);
+        guard.entry("captures".to_string()).or_default().push(doc);
         Ok(None)
     }
 }

@@ -6,14 +6,17 @@ use futures::stream::BoxStream;
 use crate::error::Result;
 use crate::interfaces::guardrails::InputGuardrail;
 use crate::interfaces::providers::{ImageInput, MemoryProvider};
-use crate::services::agent::AgentService;
 use crate::interfaces::services::RoutingService as RoutingServiceTrait;
+use crate::services::agent::AgentService;
 use crate::services::routing::RoutingService;
 
 #[derive(Debug, Clone)]
 pub enum UserInput {
     Text(String),
-    Audio { bytes: Vec<u8>, input_format: String },
+    Audio {
+        bytes: Vec<u8>,
+        input_format: String,
+    },
 }
 
 #[derive(Debug, Clone)]
@@ -61,7 +64,12 @@ impl QueryService {
         }
     }
 
-    pub async fn process_text(&self, user_id: &str, query: &str, prompt: Option<&str>) -> Result<String> {
+    pub async fn process_text(
+        &self,
+        user_id: &str,
+        query: &str,
+        prompt: Option<&str>,
+    ) -> Result<String> {
         let mut processed_query = query.to_string();
         for guardrail in &self.input_guardrails {
             processed_query = guardrail.process(&processed_query).await?;
@@ -76,12 +84,22 @@ impl QueryService {
 
         let response = self
             .agent_service
-            .generate_response(&agent_name, user_id, &processed_query, &memory_context, prompt)
+            .generate_response(
+                &agent_name,
+                user_id,
+                &processed_query,
+                &memory_context,
+                prompt,
+            )
             .await?;
 
         if let Some(provider) = &self.memory_provider {
-            provider.append_message(user_id, "user", &processed_query).await?;
-            provider.append_message(user_id, "assistant", &response).await?;
+            provider
+                .append_message(user_id, "user", &processed_query)
+                .await?;
+            provider
+                .append_message(user_id, "assistant", &response)
+                .await?;
         }
 
         Ok(response)
@@ -95,7 +113,10 @@ impl QueryService {
     ) -> Result<ProcessResult> {
         let mut text = match input {
             UserInput::Text(value) => value,
-            UserInput::Audio { bytes, input_format } => {
+            UserInput::Audio {
+                bytes,
+                input_format,
+            } => {
                 self.agent_service
                     .transcribe_audio(bytes, &input_format)
                     .await?
@@ -172,7 +193,9 @@ impl QueryService {
         if let Some(provider) = &self.memory_provider {
             provider.append_message(user_id, "user", &text).await?;
             if let ProcessResult::Text(ref message) = output {
-                provider.append_message(user_id, "assistant", message).await?;
+                provider
+                    .append_message(user_id, "assistant", message)
+                    .await?;
             }
         }
 

@@ -28,9 +28,7 @@ struct Cli {
 #[cfg(not(test))]
 #[tokio::main]
 async fn main() -> Result<()> {
-    tracing_subscriber::fmt()
-        .with_env_filter("info")
-        .init();
+    tracing_subscriber::fmt().with_env_filter("info").init();
 
     let cli = Cli::parse();
     let agent = SolanaAgent::from_config_path(&cli.config).await?;

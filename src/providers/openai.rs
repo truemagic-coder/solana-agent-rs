@@ -49,9 +49,7 @@ impl OpenAiProvider {
         }
     }
 
-    fn build_system_message(
-        system_prompt: &str,
-    ) -> Result<Option<ChatCompletionRequestMessage>> {
+    fn build_system_message(system_prompt: &str) -> Result<Option<ChatCompletionRequestMessage>> {
         if system_prompt.is_empty() {
             return Ok(None);
         }
@@ -64,7 +62,9 @@ impl OpenAiProvider {
 
     fn build_user_text_message(prompt: &str) -> Result<ChatCompletionRequestMessage> {
         let message = ChatCompletionRequestUserMessageArgs::default()
-            .content(ChatCompletionRequestUserMessageContent::Text(prompt.to_string()))
+            .content(ChatCompletionRequestUserMessageContent::Text(
+                prompt.to_string(),
+            ))
             .build()
             .map_err(|e| SolanaAgentError::Runtime(e.to_string()))?;
         Ok(ChatCompletionRequestMessage::User(message))
@@ -141,7 +141,9 @@ impl OpenAiProvider {
                     parameters,
                     strict: None,
                 };
-                Some(ChatCompletionTools::Function(ChatCompletionTool { function }))
+                Some(ChatCompletionTools::Function(ChatCompletionTool {
+                    function,
+                }))
             })
             .collect()
     }
@@ -174,15 +176,13 @@ impl OpenAiProvider {
                     ChatCompletionMessageToolCalls::Function(function_call) => {
                         let name = function_call.function.name.clone();
                         let args = function_call.function.arguments.clone();
-                        let arguments =
-                            serde_json::from_str(&args).unwrap_or(Value::String(args));
+                        let arguments = serde_json::from_str(&args).unwrap_or(Value::String(args));
                         calls.push(ToolCall { name, arguments });
                     }
                     ChatCompletionMessageToolCalls::Custom(custom_call) => {
                         let name = custom_call.custom_tool.name.clone();
                         let args = custom_call.custom_tool.input.clone();
-                        let arguments =
-                            serde_json::from_str(&args).unwrap_or(Value::String(args));
+                        let arguments = serde_json::from_str(&args).unwrap_or(Value::String(args));
                         calls.push(ToolCall { name, arguments });
                     }
                 }
@@ -192,8 +192,8 @@ impl OpenAiProvider {
         if calls.is_empty() {
             #[allow(deprecated)]
             if let Some(FunctionCall { name, arguments }) = &message.function_call {
-                let parsed = serde_json::from_str(arguments)
-                    .unwrap_or(Value::String(arguments.clone()));
+                let parsed =
+                    serde_json::from_str(arguments).unwrap_or(Value::String(arguments.clone()));
                 calls.push(ToolCall {
                     name: name.clone(),
                     arguments: parsed,

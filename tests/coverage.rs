@@ -10,7 +10,8 @@ use tokio::sync::Mutex;
 
 use solana_agent::client::SolanaAgent;
 use solana_agent::config::{
-    AgentConfig, BusinessConfig, BusinessValue, Config, GuardrailConfig, GuardrailsConfig, OpenAiConfig,
+    AgentConfig, BusinessConfig, BusinessValue, Config, GuardrailConfig, GuardrailsConfig,
+    OpenAiConfig,
 };
 use solana_agent::domains::agent::BusinessMission;
 use solana_agent::error::{Result, SolanaAgentError};
@@ -27,7 +28,9 @@ use solana_agent::plugins::registry::ToolRegistry;
 use solana_agent::providers::memory::InMemoryMemoryProvider;
 use solana_agent::providers::openai::OpenAiProvider;
 use solana_agent::services::agent::AgentService;
-use solana_agent::services::query::{OutputFormat, ProcessOptions, ProcessResult, QueryService, UserInput};
+use solana_agent::services::query::{
+    OutputFormat, ProcessOptions, ProcessResult, QueryService, UserInput,
+};
 use solana_agent::services::routing::RoutingService;
 
 struct QueueLlmProvider {
@@ -338,10 +341,11 @@ impl DummyMemoryProvider {
 #[async_trait]
 impl MemoryProvider for DummyMemoryProvider {
     async fn append_message(&self, user_id: &str, role: &str, content: &str) -> Result<()> {
-        self.messages
-            .lock()
-            .await
-            .push((user_id.to_string(), role.to_string(), content.to_string()));
+        self.messages.lock().await.push((
+            user_id.to_string(),
+            role.to_string(),
+            content.to_string(),
+        ));
         Ok(())
     }
 
@@ -384,7 +388,9 @@ async fn config_from_file_and_factory_errors() {
     )
     .unwrap();
     let config = Config::from_file(tmp.path()).unwrap();
-    let _ = SolanaAgentFactory::create_from_config(config).await.unwrap();
+    let _ = SolanaAgentFactory::create_from_config(config)
+        .await
+        .unwrap();
 
     let bad = tempfile::NamedTempFile::new().unwrap();
     std::fs::write(bad.path(), "{bad}").unwrap();
@@ -402,7 +408,10 @@ async fn config_from_file_and_factory_errors() {
         mongo: None,
         guardrails: None,
     };
-    let err = SolanaAgentFactory::create_from_config(missing).await.err().unwrap();
+    let err = SolanaAgentFactory::create_from_config(missing)
+        .await
+        .err()
+        .unwrap();
     assert!(matches!(err, SolanaAgentError::Config(_)));
 
     let groq = Config {
@@ -427,7 +436,11 @@ async fn config_from_file_and_factory_errors() {
     let _ = SolanaAgentFactory::create_from_config(groq).await.unwrap();
 
     let guardrails = Config {
-        openai: Some(OpenAiConfig { api_key: "key".to_string(), model: None, base_url: None }),
+        openai: Some(OpenAiConfig {
+            api_key: "key".to_string(),
+            model: None,
+            base_url: None,
+        }),
         groq: None,
         agents: vec![AgentConfig {
             name: "agent".to_string(),
@@ -440,14 +453,26 @@ async fn config_from_file_and_factory_errors() {
         business: None,
         mongo: None,
         guardrails: Some(GuardrailsConfig {
-            input: Some(vec![GuardrailConfig { class: "noop".to_string(), config: None }]),
-            output: Some(vec![GuardrailConfig { class: "noop".to_string(), config: None }]),
+            input: Some(vec![GuardrailConfig {
+                class: "noop".to_string(),
+                config: None,
+            }]),
+            output: Some(vec![GuardrailConfig {
+                class: "noop".to_string(),
+                config: None,
+            }]),
         }),
     };
-    let _ = SolanaAgentFactory::create_from_config(guardrails).await.unwrap();
+    let _ = SolanaAgentFactory::create_from_config(guardrails)
+        .await
+        .unwrap();
 
     let mixed_guardrails = Config {
-        openai: Some(OpenAiConfig { api_key: "key".to_string(), model: None, base_url: None }),
+        openai: Some(OpenAiConfig {
+            api_key: "key".to_string(),
+            model: None,
+            base_url: None,
+        }),
         groq: None,
         agents: vec![AgentConfig {
             name: "agent".to_string(),
@@ -461,16 +486,31 @@ async fn config_from_file_and_factory_errors() {
         mongo: None,
         guardrails: Some(GuardrailsConfig {
             input: Some(vec![
-                GuardrailConfig { class: "PII".to_string(), config: None },
-                GuardrailConfig { class: "noop".to_string(), config: None },
+                GuardrailConfig {
+                    class: "PII".to_string(),
+                    config: None,
+                },
+                GuardrailConfig {
+                    class: "noop".to_string(),
+                    config: None,
+                },
             ]),
-            output: Some(vec![GuardrailConfig { class: "PII".to_string(), config: None }]),
+            output: Some(vec![GuardrailConfig {
+                class: "PII".to_string(),
+                config: None,
+            }]),
         }),
     };
-    let _ = SolanaAgentFactory::create_from_config(mixed_guardrails).await.unwrap();
+    let _ = SolanaAgentFactory::create_from_config(mixed_guardrails)
+        .await
+        .unwrap();
 
     let mongo = Config {
-        openai: Some(OpenAiConfig { api_key: "key".to_string(), model: None, base_url: None }),
+        openai: Some(OpenAiConfig {
+            api_key: "key".to_string(),
+            model: None,
+            base_url: None,
+        }),
         groq: None,
         agents: vec![AgentConfig {
             name: "agent".to_string(),
@@ -488,7 +528,10 @@ async fn config_from_file_and_factory_errors() {
         }),
         guardrails: None,
     };
-    let err = SolanaAgentFactory::create_from_config(mongo).await.err().unwrap();
+    let err = SolanaAgentFactory::create_from_config(mongo)
+        .await
+        .err()
+        .unwrap();
     assert!(matches!(err, SolanaAgentError::Config(_)));
 
     let _ok: solana_agent::error::Result<()> = Ok(());
@@ -501,8 +544,7 @@ async fn guardrails_work() {
     let noop = NoopGuardrail;
     assert_eq!(noop.process("hi").await.unwrap(), "hi");
     let out = <NoopGuardrail as solana_agent::interfaces::guardrails::OutputGuardrail>::process(
-        &noop,
-        "out",
+        &noop, "out",
     )
     .await
     .unwrap();
@@ -511,12 +553,13 @@ async fn guardrails_work() {
     let pii = PiiGuardrail::new(None);
     let scrubbed = pii.process("email test@example.com").await.unwrap();
     assert!(scrubbed.contains("[REDACTED]"));
-    let scrubbed = <PiiGuardrail as solana_agent::interfaces::guardrails::OutputGuardrail>::process(
-        &pii,
-        "call +1 555 123 4567",
-    )
-    .await
-    .unwrap();
+    let scrubbed =
+        <PiiGuardrail as solana_agent::interfaces::guardrails::OutputGuardrail>::process(
+            &pii,
+            "call +1 555 123 4567",
+        )
+        .await
+        .unwrap();
     assert!(scrubbed.contains("[REDACTED]"));
 
     let custom = PiiGuardrail::new(Some(json!({"replacement":"X"})));
@@ -546,7 +589,10 @@ async fn tool_registry_and_plugin_manager() {
     let all = registry.list_all_tools().await;
     assert_eq!(all, vec!["tool".to_string()]);
 
-    registry.configure_all_tools(json!({"value": 1})).await.unwrap();
+    registry
+        .configure_all_tools(json!({"value": 1}))
+        .await
+        .unwrap();
 
     let mut manager = DefaultPluginManager::new(json!({"ok":true}));
     assert!(manager.register_plugin(Box::new(DummyPlugin::new("p1", true))));
@@ -559,9 +605,14 @@ async fn tool_registry_and_plugin_manager() {
     let _ = manager.tool_registry();
 
     let registry = ToolRegistry::new();
-    let conditional = Arc::new(ConditionalTool { name: "conditional".to_string() });
+    let conditional = Arc::new(ConditionalTool {
+        name: "conditional".to_string(),
+    });
     assert!(registry.register_tool(conditional).await);
-    let err = registry.configure_all_tools(json!({"fail": true})).await.unwrap_err();
+    let err = registry
+        .configure_all_tools(json!({"fail": true}))
+        .await
+        .unwrap_err();
     assert!(matches!(err, SolanaAgentError::Runtime(_)));
 
     let registry = ToolRegistry::new();
@@ -573,7 +624,10 @@ async fn tool_registry_and_plugin_manager() {
 async fn memory_provider_defaults_and_in_memory() {
     let provider = InMemoryMemoryProvider::new();
     provider.append_message("u1", "user", "hi").await.unwrap();
-    provider.append_message("u1", "assistant", "hello").await.unwrap();
+    provider
+        .append_message("u1", "assistant", "hello")
+        .await
+        .unwrap();
 
     let history = provider.get_history("u1", 1).await.unwrap();
     assert_eq!(history.len(), 1);
@@ -587,32 +641,60 @@ async fn memory_provider_defaults_and_in_memory() {
     provider
         .store(
             "u2",
-            vec![json!({"role":"user","content":"a"}), json!({"role":"assistant","content":"b"})],
+            vec![
+                json!({"role":"user","content":"a"}),
+                json!({"role":"assistant","content":"b"}),
+            ],
         )
         .await
         .unwrap();
-    assert_eq!(provider.retrieve("u2").await.unwrap(), "user: a\nassistant: b");
+    assert_eq!(
+        provider.retrieve("u2").await.unwrap(),
+        "user: a\nassistant: b"
+    );
     provider.delete("u2").await.unwrap();
 
     provider
-        .save_capture("u3", "cap", Some("agent"), json!({"x":1}), Some(json!({"type":"object"})))
+        .save_capture(
+            "u3",
+            "cap",
+            Some("agent"),
+            json!({"x":1}),
+            Some(json!({"type":"object"})),
+        )
         .await
         .unwrap();
     provider
         .save_capture("u3", "cap", None, json!({"x":2}), None)
         .await
         .unwrap();
-    let captures = provider.find("captures", json!(null), None, None, None).unwrap();
+    let captures = provider
+        .find("captures", json!(null), None, None, None)
+        .unwrap();
     assert_eq!(captures.len(), 2);
-    let filtered = provider.find("captures", json!({"user_id":"u3"}), None, None, None).unwrap();
+    let filtered = provider
+        .find("captures", json!({"user_id":"u3"}), None, None, None)
+        .unwrap();
     assert_eq!(filtered.len(), 2);
-    assert_eq!(provider.count_documents("captures", json!(null)).unwrap(), 2);
+    assert_eq!(
+        provider.count_documents("captures", json!(null)).unwrap(),
+        2
+    );
 
     let dummy = DummyMemoryProvider::new();
-    dummy.store("u4", vec![json!({"role":"user","content":"x"})]).await.unwrap();
+    dummy
+        .store("u4", vec![json!({"role":"user","content":"x"})])
+        .await
+        .unwrap();
     assert_eq!(dummy.retrieve("u4").await.unwrap(), "user: x");
     dummy.delete("u4").await.unwrap();
-    assert_eq!(dummy.find("any", json!(null), None, None, None).unwrap().len(), 0);
+    assert_eq!(
+        dummy
+            .find("any", json!(null), None, None, None)
+            .unwrap()
+            .len(),
+        0
+    );
     assert_eq!(dummy.count_documents("any", json!(null)).unwrap(), 0);
     assert!(dummy
         .save_capture("u", "cap", None, json!({}), None)
@@ -623,19 +705,25 @@ async fn memory_provider_defaults_and_in_memory() {
 
 #[tokio::test]
 async fn routing_and_agent_service() {
-    let llm = Arc::new(QueueLlmProvider::new(vec![LlmResponse {
-        text: "tool response".to_string(),
-        tool_calls: vec![
-            ToolCall {
-                name: "tool1".to_string(),
-                arguments: json!({"value": 1}),
-            },
-            ToolCall {
-                name: "missing".to_string(),
-                arguments: json!({}),
-            },
-        ],
-    }, LlmResponse { text: "done".to_string(), tool_calls: Vec::new() }]));
+    let llm = Arc::new(QueueLlmProvider::new(vec![
+        LlmResponse {
+            text: "tool response".to_string(),
+            tool_calls: vec![
+                ToolCall {
+                    name: "tool1".to_string(),
+                    arguments: json!({"value": 1}),
+                },
+                ToolCall {
+                    name: "missing".to_string(),
+                    arguments: json!({}),
+                },
+            ],
+        },
+        LlmResponse {
+            text: "done".to_string(),
+            tool_calls: Vec::new(),
+        },
+    ]));
 
     let mission = BusinessMission {
         mission: Some("m".to_string()),
@@ -679,7 +767,13 @@ async fn routing_and_agent_service() {
         None,
         vec![Arc::new(PiiGuardrail::new(None))],
     );
-    pii_service.register_ai_agent("agent2".to_string(), "inst".to_string(), "spec".to_string(), None, None);
+    pii_service.register_ai_agent(
+        "agent2".to_string(),
+        "inst".to_string(),
+        "spec".to_string(),
+        None,
+        None,
+    );
     let response = pii_service
         .generate_response("agent2", "u1", "email test@example.com", "", None)
         .await
@@ -719,22 +813,21 @@ async fn routing_and_agent_service() {
     assert_eq!(response, "image response");
 
     let structured = service
-        .generate_structured_response(
-            "agent1",
-            "u1",
-            "query",
-            "",
-            None,
-            json!({"type":"object"}),
-        )
+        .generate_structured_response("agent1", "u1", "query", "", None, json!({"type":"object"}))
         .await
         .unwrap();
     assert_eq!(structured, json!({"ok": true}));
 
-    let transcript = service.transcribe_audio(vec![1, 2, 3], "wav").await.unwrap();
+    let transcript = service
+        .transcribe_audio(vec![1, 2, 3], "wav")
+        .await
+        .unwrap();
     assert_eq!(transcript, "transcribed");
 
-    let audio = service.synthesize_audio("hi", "alloy", "mp3").await.unwrap();
+    let audio = service
+        .synthesize_audio("hi", "alloy", "mp3")
+        .await
+        .unwrap();
     assert_eq!(audio, b"audio".to_vec());
 
     let routing = RoutingService::new(Arc::new(service));
@@ -796,20 +889,40 @@ async fn routing_and_agent_service() {
 
     let empty_service = AgentService::new(Arc::new(QueueLlmProvider::new(vec![])), None, vec![]);
     let empty_routing = RoutingService::new(Arc::new(empty_service));
-    assert_eq!(empty_routing.route_query("anything").await.unwrap(), "default");
+    assert_eq!(
+        empty_routing.route_query("anything").await.unwrap(),
+        "default"
+    );
 }
 
 #[tokio::test]
 async fn query_service_and_client() {
     let llm = Arc::new(QueueLlmProvider::new(vec![]));
     let mut service = AgentService::new(llm.clone(), None, vec![Arc::new(NoopGuardrail)]);
-    service.register_ai_agent("agent".to_string(), "inst".to_string(), "spec".to_string(), None, None);
-    service.register_ai_agent("router_agent".to_string(), "inst".to_string(), "spec".to_string(), None, None);
+    service.register_ai_agent(
+        "agent".to_string(),
+        "inst".to_string(),
+        "spec".to_string(),
+        None,
+        None,
+    );
+    service.register_ai_agent(
+        "router_agent".to_string(),
+        "inst".to_string(),
+        "spec".to_string(),
+        None,
+        None,
+    );
     let service = Arc::new(service);
     let routing = Arc::new(RoutingService::new(service.clone()));
     let memory = Arc::new(InMemoryMemoryProvider::new());
 
-    let query = QueryService::new(service.clone(), routing.clone(), Some(memory), vec![Arc::new(PiiGuardrail::new(None))]);
+    let query = QueryService::new(
+        service.clone(),
+        routing.clone(),
+        Some(memory),
+        vec![Arc::new(PiiGuardrail::new(None))],
+    );
 
     let text = query.process_text("user", "hello", None).await.unwrap();
     assert_eq!(text, "mock text");
@@ -829,7 +942,10 @@ async fn query_service_and_client() {
     let result = query
         .process(
             "user",
-            UserInput::Audio { bytes: vec![1, 2, 3], input_format: "wav".to_string() },
+            UserInput::Audio {
+                bytes: vec![1, 2, 3],
+                input_format: "wav".to_string(),
+            },
             options,
         )
         .await
@@ -841,7 +957,9 @@ async fn query_service_and_client() {
 
     let options = ProcessOptions {
         prompt: None,
-        images: vec![ImageInput { data: ImageData::Bytes(vec![1, 2, 3]) }],
+        images: vec![ImageInput {
+            data: ImageData::Bytes(vec![1, 2, 3]),
+        }],
         output_format: OutputFormat::Text,
         image_detail: "low".to_string(),
         json_schema: None,
@@ -859,7 +977,10 @@ async fn query_service_and_client() {
     let options = ProcessOptions {
         prompt: None,
         images: vec![],
-        output_format: OutputFormat::Audio { voice: "alloy".to_string(), format: "mp3".to_string() },
+        output_format: OutputFormat::Audio {
+            voice: "alloy".to_string(),
+            format: "mp3".to_string(),
+        },
         image_detail: "auto".to_string(),
         json_schema: None,
         router: None,
@@ -879,14 +1000,23 @@ async fn query_service_and_client() {
 
     let llm = Arc::new(QueueLlmProvider::new(vec![]));
     let mut service = AgentService::new(llm, None, vec![]);
-    service.register_ai_agent("agent".to_string(), "inst".to_string(), "spec".to_string(), None, None);
+    service.register_ai_agent(
+        "agent".to_string(),
+        "inst".to_string(),
+        "spec".to_string(),
+        None,
+        None,
+    );
     let service = Arc::new(service);
     let routing = Arc::new(RoutingService::new(service.clone()));
     let query = QueryService::new(service, routing, None, vec![]);
     assert_eq!(query.get_user_history("user", 1).await.unwrap().len(), 0);
     query.delete_user_history("user").await.unwrap();
 
-    let text = query.process_text("user", "hello", Some("prompt")).await.unwrap();
+    let text = query
+        .process_text("user", "hello", Some("prompt"))
+        .await
+        .unwrap();
     assert_eq!(text, "mock text");
 
     let options = ProcessOptions {
@@ -907,7 +1037,11 @@ async fn query_service_and_client() {
     }
 
     let config = Config {
-        openai: Some(OpenAiConfig { api_key: "key".to_string(), model: None, base_url: None }),
+        openai: Some(OpenAiConfig {
+            api_key: "key".to_string(),
+            model: None,
+            base_url: None,
+        }),
         groq: None,
         agents: vec![AgentConfig {
             name: "agent".to_string(),
@@ -920,13 +1054,22 @@ async fn query_service_and_client() {
         business: Some(BusinessConfig {
             mission: Some("m".to_string()),
             voice: Some("v".to_string()),
-            values: Some(vec![BusinessValue { name: "n".to_string(), description: "d".to_string() }]),
+            values: Some(vec![BusinessValue {
+                name: "n".to_string(),
+                description: "d".to_string(),
+            }]),
             goals: Some(vec!["g".to_string()]),
         }),
         mongo: None,
         guardrails: Some(GuardrailsConfig {
-            input: Some(vec![GuardrailConfig { class: "PII".to_string(), config: None }]),
-            output: Some(vec![GuardrailConfig { class: "unknown".to_string(), config: None }]),
+            input: Some(vec![GuardrailConfig {
+                class: "PII".to_string(),
+                config: None,
+            }]),
+            output: Some(vec![GuardrailConfig {
+                class: "unknown".to_string(),
+                config: None,
+            }]),
         }),
     };
     let agent = SolanaAgent::from_config(config).await.unwrap();
@@ -942,20 +1085,22 @@ async fn query_service_and_client() {
     assert!(matches!(err, SolanaAgentError::Runtime(_)));
 
     let server = MockServer::start_async().await;
-    let chat_mock = server.mock_async(|when, then| {
-        when.method(POST).path("/chat/completions");
-        then.status(200).json_body(json!({
-            "id": "chatcmpl-path",
-            "object": "chat.completion",
-            "created": 1,
-            "model": "gpt-4o-mini",
-            "choices": [{
-                "index": 0,
-                "message": {"role": "assistant", "content": "mock text"},
-                "finish_reason": "stop"
-            }]
-        }));
-    }).await;
+    let chat_mock = server
+        .mock_async(|when, then| {
+            when.method(POST).path("/chat/completions");
+            then.status(200).json_body(json!({
+                "id": "chatcmpl-path",
+                "object": "chat.completion",
+                "created": 1,
+                "model": "gpt-4o-mini",
+                "choices": [{
+                    "index": 0,
+                    "message": {"role": "assistant", "content": "mock text"},
+                    "finish_reason": "stop"
+                }]
+            }));
+        })
+        .await;
 
     let tmp = tempfile::NamedTempFile::new().unwrap();
     std::fs::write(
@@ -990,22 +1135,28 @@ async fn query_service_and_client() {
 #[tokio::test]
 async fn openai_provider_via_httpmock() {
     let server = MockServer::start_async().await;
-    let chat_mock = server.mock_async(|when, then| {
-        when.method(POST).path("/chat/completions");
-        then.status(200).json_body(json!({
-            "id": "chatcmpl-1",
-            "object": "chat.completion",
-            "created": 1,
-            "model": "gpt-4o-mini",
-            "choices": [{
-                "index": 0,
-                "message": {"role": "assistant", "content": "hello"},
-                "finish_reason": "stop"
-            }]
-        }));
-    }).await;
+    let chat_mock = server
+        .mock_async(|when, then| {
+            when.method(POST).path("/chat/completions");
+            then.status(200).json_body(json!({
+                "id": "chatcmpl-1",
+                "object": "chat.completion",
+                "created": 1,
+                "model": "gpt-4o-mini",
+                "choices": [{
+                    "index": 0,
+                    "message": {"role": "assistant", "content": "hello"},
+                    "finish_reason": "stop"
+                }]
+            }));
+        })
+        .await;
 
-    let provider = OpenAiProvider::new("key".to_string(), Some("gpt-4o-mini".to_string()), Some(server.base_url()));
+    let provider = OpenAiProvider::new(
+        "key".to_string(),
+        Some("gpt-4o-mini".to_string()),
+        Some(server.base_url()),
+    );
     let text = provider.generate_text("hi", "", None).await.unwrap();
     assert_eq!(text, "hello");
 
@@ -1022,34 +1173,44 @@ async fn openai_provider_via_httpmock() {
 async fn openai_provider_tools_images_structured_audio() {
     let server = MockServer::start_async().await;
 
-    let tool_mock = server.mock_async(|when, then| {
-        when.method(POST).path("/chat/completions");
-        then.status(200).json_body(json!({
-            "id": "chatcmpl-2",
-            "object": "chat.completion",
-            "created": 1,
-            "model": "gpt-4o-mini",
-            "choices": [{
-                "index": 0,
-                "message": {
-                    "role": "assistant",
-                    "content": null,
-                    "tool_calls": [
-                        {
-                            "type": "function",
-                            "id": "call_1",
-                            "function": {"name": "tool1", "arguments": "{\"x\":1}"}
-                        }
-                    ]
-                },
-                "finish_reason": "tool_calls"
-            }]
-        }));
-    }).await;
+    let tool_mock = server
+        .mock_async(|when, then| {
+            when.method(POST).path("/chat/completions");
+            then.status(200).json_body(json!({
+                "id": "chatcmpl-2",
+                "object": "chat.completion",
+                "created": 1,
+                "model": "gpt-4o-mini",
+                "choices": [{
+                    "index": 0,
+                    "message": {
+                        "role": "assistant",
+                        "content": null,
+                        "tool_calls": [
+                            {
+                                "type": "function",
+                                "id": "call_1",
+                                "function": {"name": "tool1", "arguments": "{\"x\":1}"}
+                            }
+                        ]
+                    },
+                    "finish_reason": "tool_calls"
+                }]
+            }));
+        })
+        .await;
 
-    let provider = OpenAiProvider::new("key".to_string(), Some("gpt-4o-mini".to_string()), Some(server.base_url()));
+    let provider = OpenAiProvider::new(
+        "key".to_string(),
+        Some("gpt-4o-mini".to_string()),
+        Some(server.base_url()),
+    );
     let response = provider
-        .generate_with_tools("hi", "sys", vec![json!({"type":"function","name":"tool1","parameters":{}})])
+        .generate_with_tools(
+            "hi",
+            "sys",
+            vec![json!({"type":"function","name":"tool1","parameters":{}})],
+        )
         .await
         .unwrap();
     assert_eq!(response.tool_calls.len(), 1);
@@ -1058,20 +1219,22 @@ async fn openai_provider_tools_images_structured_audio() {
     tool_mock.assert_hits(1);
 
     let structured_server = MockServer::start_async().await;
-    let structured_mock = structured_server.mock_async(|when, then| {
-        when.method(POST).path("/chat/completions");
-        then.status(200).json_body(json!({
-            "id": "chatcmpl-3",
-            "object": "chat.completion",
-            "created": 1,
-            "model": "gpt-4o-mini",
-            "choices": [{
-                "index": 0,
-                "message": {"role": "assistant", "content": "{\"ok\":true}"},
-                "finish_reason": "stop"
-            }]
-        }));
-    }).await;
+    let structured_mock = structured_server
+        .mock_async(|when, then| {
+            when.method(POST).path("/chat/completions");
+            then.status(200).json_body(json!({
+                "id": "chatcmpl-3",
+                "object": "chat.completion",
+                "created": 1,
+                "model": "gpt-4o-mini",
+                "choices": [{
+                    "index": 0,
+                    "message": {"role": "assistant", "content": "{\"ok\":true}"},
+                    "finish_reason": "stop"
+                }]
+            }));
+        })
+        .await;
     let structured_provider = OpenAiProvider::new(
         "key".to_string(),
         Some("gpt-4o-mini".to_string()),
@@ -1085,20 +1248,22 @@ async fn openai_provider_tools_images_structured_audio() {
     structured_mock.assert_hits(1);
 
     let image_server = MockServer::start_async().await;
-    let image_mock = image_server.mock_async(|when, then| {
-        when.method(POST).path("/chat/completions");
-        then.status(200).json_body(json!({
-            "id": "chatcmpl-4",
-            "object": "chat.completion",
-            "created": 1,
-            "model": "gpt-4o-mini",
-            "choices": [{
-                "index": 0,
-                "message": {"role": "assistant", "content": "image"},
-                "finish_reason": "stop"
-            }]
-        }));
-    }).await;
+    let image_mock = image_server
+        .mock_async(|when, then| {
+            when.method(POST).path("/chat/completions");
+            then.status(200).json_body(json!({
+                "id": "chatcmpl-4",
+                "object": "chat.completion",
+                "created": 1,
+                "model": "gpt-4o-mini",
+                "choices": [{
+                    "index": 0,
+                    "message": {"role": "assistant", "content": "image"},
+                    "finish_reason": "stop"
+                }]
+            }));
+        })
+        .await;
     let image_provider = OpenAiProvider::new(
         "key".to_string(),
         Some("gpt-4o-mini".to_string()),
@@ -1107,7 +1272,9 @@ async fn openai_provider_tools_images_structured_audio() {
     let image_text = image_provider
         .generate_text_with_images(
             "hi",
-            vec![ImageInput { data: ImageData::Bytes(vec![1, 2, 3]) }],
+            vec![ImageInput {
+                data: ImageData::Bytes(vec![1, 2, 3]),
+            }],
             "",
             "high",
             None,
@@ -1118,10 +1285,12 @@ async fn openai_provider_tools_images_structured_audio() {
     image_mock.assert_hits(1);
 
     let speech_server = MockServer::start_async().await;
-    let speech_mock = speech_server.mock_async(|when, then| {
-        when.method(POST).path("/audio/speech");
-        then.status(200).body("AUDIO");
-    }).await;
+    let speech_mock = speech_server
+        .mock_async(|when, then| {
+            when.method(POST).path("/audio/speech");
+            then.status(200).body("AUDIO");
+        })
+        .await;
     let speech_provider = OpenAiProvider::new(
         "key".to_string(),
         Some("gpt-4o-mini".to_string()),
@@ -1132,26 +1301,31 @@ async fn openai_provider_tools_images_structured_audio() {
     speech_mock.assert_hits(1);
 
     let transcribe_server = MockServer::start_async().await;
-    let transcribe_mock = transcribe_server.mock_async(|when, then| {
-        when.method(POST).path("/audio/transcriptions");
-        then.status(200).json_body(json!({
-            "text": "transcribed",
-            "logprobs": null,
-            "usage": {
-                "type": "tokens",
-                "input_tokens": 1,
-                "output_tokens": 1,
-                "total_tokens": 2,
-                "input_token_details": null
-            }
-        }));
-    }).await;
+    let transcribe_mock = transcribe_server
+        .mock_async(|when, then| {
+            when.method(POST).path("/audio/transcriptions");
+            then.status(200).json_body(json!({
+                "text": "transcribed",
+                "logprobs": null,
+                "usage": {
+                    "type": "tokens",
+                    "input_tokens": 1,
+                    "output_tokens": 1,
+                    "total_tokens": 2,
+                    "input_token_details": null
+                }
+            }));
+        })
+        .await;
     let transcribe_provider = OpenAiProvider::new(
         "key".to_string(),
         Some("gpt-4o-mini".to_string()),
         Some(transcribe_server.base_url()),
     );
-    let transcript = transcribe_provider.transcribe_audio(vec![1, 2, 3], "wav").await.unwrap();
+    let transcript = transcribe_provider
+        .transcribe_audio(vec![1, 2, 3], "wav")
+        .await
+        .unwrap();
     assert_eq!(transcript, "transcribed");
     transcribe_mock.assert_hits(1);
 }
@@ -1184,7 +1358,9 @@ async fn openai_provider_additional_branches() {
         .generate_text(
             "hi",
             "sys",
-            Some(vec![json!({"type":"function","name":"tool1","parameters":{}})]),
+            Some(vec![
+                json!({"type":"function","name":"tool1","parameters":{}}),
+            ]),
         )
         .await
         .unwrap();
@@ -1210,7 +1386,11 @@ async fn openai_provider_additional_branches() {
         Some(empty_server.base_url()),
     );
     let response = empty_provider
-        .generate_with_tools("hi", "sys", vec![json!({"type":"function","name":"tool1","parameters":{}})])
+        .generate_with_tools(
+            "hi",
+            "sys",
+            vec![json!({"type":"function","name":"tool1","parameters":{}})],
+        )
         .await
         .unwrap();
     assert!(response.text.is_empty());
@@ -1244,7 +1424,9 @@ async fn openai_provider_additional_branches() {
             "hi",
             "system",
             json!({"title":"Example","type":"object"}),
-            Some(vec![json!({"type":"function","name":"tool1","parameters":{}})]),
+            Some(vec![
+                json!({"type":"function","name":"tool1","parameters":{}}),
+            ]),
         )
         .await
         .unwrap();
@@ -1276,10 +1458,14 @@ async fn openai_provider_additional_branches() {
     let image_text = image_provider
         .generate_text_with_images(
             "hi",
-            vec![ImageInput { data: ImageData::Bytes(vec![1, 2, 3]) }],
+            vec![ImageInput {
+                data: ImageData::Bytes(vec![1, 2, 3]),
+            }],
             "sys",
             "auto",
-            Some(vec![json!({"type":"function","name":"tool1","parameters":{}})]),
+            Some(vec![
+                json!({"type":"function","name":"tool1","parameters":{}}),
+            ]),
         )
         .await
         .unwrap();
@@ -1290,20 +1476,22 @@ async fn openai_provider_additional_branches() {
 #[tokio::test]
 async fn openai_provider_variants_and_agent_process() {
     let chat_server = MockServer::start_async().await;
-    let chat_mock = chat_server.mock_async(|when, then| {
-        when.method(POST).path("/chat/completions");
-        then.status(200).json_body(json!({
-            "id": "chatcmpl-5",
-            "object": "chat.completion",
-            "created": 1,
-            "model": "gpt-4o-mini",
-            "choices": [{
-                "index": 0,
-                "message": {"role": "assistant", "content": "text"},
-                "finish_reason": "stop"
-            }]
-        }));
-    }).await;
+    let chat_mock = chat_server
+        .mock_async(|when, then| {
+            when.method(POST).path("/chat/completions");
+            then.status(200).json_body(json!({
+                "id": "chatcmpl-5",
+                "object": "chat.completion",
+                "created": 1,
+                "model": "gpt-4o-mini",
+                "choices": [{
+                    "index": 0,
+                    "message": {"role": "assistant", "content": "text"},
+                    "finish_reason": "stop"
+                }]
+            }));
+        })
+        .await;
 
     let chat_provider = OpenAiProvider::new(
         "key".to_string(),
@@ -1318,57 +1506,68 @@ async fn openai_provider_variants_and_agent_process() {
     chat_mock.assert_hits(1);
 
     let skip_server = MockServer::start_async().await;
-    let skip_mock = skip_server.mock_async(|when, then| {
-        when.method(POST).path("/chat/completions");
-        then.status(200).json_body(json!({
-            "id": "chatcmpl-skip",
-            "object": "chat.completion",
-            "created": 1,
-            "model": "gpt-4o-mini",
-            "choices": [{
-                "index": 0,
-                "message": {"role": "assistant", "content": "skip"},
-                "finish_reason": "stop"
-            }]
-        }));
-    }).await;
+    let skip_mock = skip_server
+        .mock_async(|when, then| {
+            when.method(POST).path("/chat/completions");
+            then.status(200).json_body(json!({
+                "id": "chatcmpl-skip",
+                "object": "chat.completion",
+                "created": 1,
+                "model": "gpt-4o-mini",
+                "choices": [{
+                    "index": 0,
+                    "message": {"role": "assistant", "content": "skip"},
+                    "finish_reason": "stop"
+                }]
+            }));
+        })
+        .await;
     let skip_provider = OpenAiProvider::new(
         "key".to_string(),
         Some("gpt-4o-mini".to_string()),
         Some(skip_server.base_url()),
     );
     let text = skip_provider
-        .generate_text("hi", "sys", Some(vec![json!({"type":"custom","name":"x"}), json!({"type":"function","parameters":{}})]))
+        .generate_text(
+            "hi",
+            "sys",
+            Some(vec![
+                json!({"type":"custom","name":"x"}),
+                json!({"type":"function","parameters":{}}),
+            ]),
+        )
         .await
         .unwrap();
     assert_eq!(text, "skip");
     skip_mock.assert_hits(1);
 
     let nested_server = MockServer::start_async().await;
-    let nested_mock = nested_server.mock_async(|when, then| {
-        when.method(POST).path("/chat/completions");
-        then.status(200).json_body(json!({
-            "id": "chatcmpl-6",
-            "object": "chat.completion",
-            "created": 1,
-            "model": "gpt-4o-mini",
-            "choices": [{
-                "index": 0,
-                "message": {
-                    "role": "assistant",
-                    "content": null,
-                    "tool_calls": [
-                        {
-                            "type": "function",
-                            "id": "call_1",
-                            "function": {"name": "tool_nested", "arguments": "{\"x\":1}"}
-                        }
-                    ]
-                },
-                "finish_reason": "tool_calls"
-            }]
-        }));
-    }).await;
+    let nested_mock = nested_server
+        .mock_async(|when, then| {
+            when.method(POST).path("/chat/completions");
+            then.status(200).json_body(json!({
+                "id": "chatcmpl-6",
+                "object": "chat.completion",
+                "created": 1,
+                "model": "gpt-4o-mini",
+                "choices": [{
+                    "index": 0,
+                    "message": {
+                        "role": "assistant",
+                        "content": null,
+                        "tool_calls": [
+                            {
+                                "type": "function",
+                                "id": "call_1",
+                                "function": {"name": "tool_nested", "arguments": "{\"x\":1}"}
+                            }
+                        ]
+                    },
+                    "finish_reason": "tool_calls"
+                }]
+            }));
+        })
+        .await;
     let nested_provider = OpenAiProvider::new(
         "key".to_string(),
         Some("gpt-4o-mini".to_string()),
@@ -1386,88 +1585,102 @@ async fn openai_provider_variants_and_agent_process() {
     nested_mock.assert_hits(1);
 
     let custom_server = MockServer::start_async().await;
-    let custom_mock = custom_server.mock_async(|when, then| {
-        when.method(POST).path("/chat/completions");
-        then.status(200).json_body(json!({
-            "id": "chatcmpl-7",
-            "object": "chat.completion",
-            "created": 1,
-            "model": "gpt-4o-mini",
-            "choices": [{
-                "index": 0,
-                "message": {
-                    "role": "assistant",
-                    "content": null,
-                    "tool_calls": [
-                        {
-                            "type": "custom",
-                            "id": "call_2",
-                            "custom_tool": {"name": "custom_tool", "input": "{\"y\":2}"}
-                        }
-                    ]
-                },
-                "finish_reason": "tool_calls"
-            }]
-        }));
-    }).await;
+    let custom_mock = custom_server
+        .mock_async(|when, then| {
+            when.method(POST).path("/chat/completions");
+            then.status(200).json_body(json!({
+                "id": "chatcmpl-7",
+                "object": "chat.completion",
+                "created": 1,
+                "model": "gpt-4o-mini",
+                "choices": [{
+                    "index": 0,
+                    "message": {
+                        "role": "assistant",
+                        "content": null,
+                        "tool_calls": [
+                            {
+                                "type": "custom",
+                                "id": "call_2",
+                                "custom_tool": {"name": "custom_tool", "input": "{\"y\":2}"}
+                            }
+                        ]
+                    },
+                    "finish_reason": "tool_calls"
+                }]
+            }));
+        })
+        .await;
     let custom_provider = OpenAiProvider::new(
         "key".to_string(),
         Some("gpt-4o-mini".to_string()),
         Some(custom_server.base_url()),
     );
     let response = custom_provider
-        .generate_with_tools("hi", "sys", vec![json!({"type":"function","name":"x","parameters":{}})])
+        .generate_with_tools(
+            "hi",
+            "sys",
+            vec![json!({"type":"function","name":"x","parameters":{}})],
+        )
         .await
         .unwrap();
     assert_eq!(response.tool_calls[0].name, "custom_tool");
     custom_mock.assert_hits(1);
 
     let fallback_server = MockServer::start_async().await;
-    let fallback_mock = fallback_server.mock_async(|when, then| {
-        when.method(POST).path("/chat/completions");
-        then.status(200).json_body(json!({
-            "id": "chatcmpl-8",
-            "object": "chat.completion",
-            "created": 1,
-            "model": "gpt-4o-mini",
-            "choices": [{
-                "index": 0,
-                "message": {
-                    "role": "assistant",
-                    "content": null,
-                    "function_call": {"name": "legacy", "arguments": "{\"z\":3}"}
-                },
-                "finish_reason": "function_call"
-            }]
-        }));
-    }).await;
+    let fallback_mock = fallback_server
+        .mock_async(|when, then| {
+            when.method(POST).path("/chat/completions");
+            then.status(200).json_body(json!({
+                "id": "chatcmpl-8",
+                "object": "chat.completion",
+                "created": 1,
+                "model": "gpt-4o-mini",
+                "choices": [{
+                    "index": 0,
+                    "message": {
+                        "role": "assistant",
+                        "content": null,
+                        "function_call": {"name": "legacy", "arguments": "{\"z\":3}"}
+                    },
+                    "finish_reason": "function_call"
+                }]
+            }));
+        })
+        .await;
     let fallback_provider = OpenAiProvider::new(
         "key".to_string(),
         Some("gpt-4o-mini".to_string()),
         Some(fallback_server.base_url()),
     );
     let response = fallback_provider
-        .generate_with_tools("hi", "sys", vec![json!({"type":"function","name":"legacy","parameters":{}})])
+        .generate_with_tools(
+            "hi",
+            "sys",
+            vec![json!({"type":"function","name":"legacy","parameters":{}})],
+        )
         .await
         .unwrap();
     assert_eq!(response.tool_calls[0].name, "legacy");
     fallback_mock.assert_hits(1);
 
     let image_server = MockServer::start_async().await;
-    let image_mock = image_server.mock_async(|when, then| {
-        when.method(POST).path("/chat/completions");
-        then.status(200).json_body(json!({
-            "id": "chatcmpl-9",
-            "object": "chat.completion",
-            "created": 1,
-            "model": "gpt-4o-mini",
-            "choices": [{
-                "index": 0,
-                "message": {"role": "assistant", "content": "image"},
-                "finish_reason": "stop"
-            }]
-        }));
-    }).await;
+    let image_mock = image_server
+        .mock_async(|when, then| {
+            when.method(POST).path("/chat/completions");
+            then.status(200).json_body(json!({
+                "id": "chatcmpl-9",
+                "object": "chat.completion",
+                "created": 1,
+                "model": "gpt-4o-mini",
+                "choices": [{
+                    "index": 0,
+                    "message": {"role": "assistant", "content": "image"},
+                    "finish_reason": "stop"
+                }]
+            }));
+        })
+        .await;
     let image_provider = OpenAiProvider::new(
         "key".to_string(),
         Some("gpt-4o-mini".to_string()),
@@ -1476,7 +1689,9 @@ async fn openai_provider_variants_and_agent_process() {
     let _ = image_provider
         .generate_text_with_images(
             "hi",
-            vec![ImageInput { data: ImageData::Url("http://example.com".to_string()) }],
+            vec![ImageInput {
+                data: ImageData::Url("http://example.com".to_string()),
+            }],
             "",
             "low",
             None,
@@ -1486,7 +1701,9 @@ async fn openai_provider_variants_and_agent_process() {
     let _ = image_provider
         .generate_text_with_images(
             "hi",
-            vec![ImageInput { data: ImageData::Url("http://example.com".to_string()) }],
+            vec![ImageInput {
+                data: ImageData::Url("http://example.com".to_string()),
+            }],
             "sys",
             "weird",
             None,
@@ -1496,7 +1713,9 @@ async fn openai_provider_variants_and_agent_process() {
     let _ = image_provider
         .generate_text_with_images(
             "hi",
-            vec![ImageInput { data: ImageData::Bytes(vec![1, 2, 3]) }],
+            vec![ImageInput {
+                data: ImageData::Bytes(vec![1, 2, 3]),
+            }],
             "",
             "auto",
             None,
@@ -1506,28 +1725,20 @@ async fn openai_provider_variants_and_agent_process() {
     image_mock.assert_hits(3);
 
     let speech_server = MockServer::start_async().await;
-    let speech_mock = speech_server.mock_async(|when, then| {
-        when.method(POST).path("/audio/speech");
-        then.status(200).body("AUDIO");
-    }).await;
+    let speech_mock = speech_server
+        .mock_async(|when, then| {
+            when.method(POST).path("/audio/speech");
+            then.status(200).body("AUDIO");
+        })
+        .await;
     let speech_provider = OpenAiProvider::new(
         "key".to_string(),
         Some("gpt-4o-mini".to_string()),
         Some(speech_server.base_url()),
     );
     let voices = [
-        "alloy",
-        "ash",
-        "ballad",
-        "coral",
-        "echo",
-        "fable",
-        "onyx",
-        "nova",
-        "sage",
-        "shimmer",
-        "verse",
-        "custom",
+        "alloy", "ash", "ballad", "coral", "echo", "fable", "onyx", "nova", "sage", "shimmer",
+        "verse", "custom",
     ];
     for voice in voices {
         let _ = speech_provider.tts("hi", voice, "mp3").await.unwrap();
@@ -1539,23 +1750,29 @@ async fn openai_provider_variants_and_agent_process() {
     speech_mock.assert_hits(voices.len() as usize + formats.len() as usize);
 
     let agent_server = MockServer::start_async().await;
-    let agent_mock = agent_server.mock_async(|when, then| {
-        when.method(POST).path("/chat/completions");
-        then.status(200).json_body(json!({
-            "id": "chatcmpl-10",
-            "object": "chat.completion",
-            "created": 1,
-            "model": "gpt-4o-mini",
-            "choices": [{
-                "index": 0,
-                "message": {"role": "assistant", "content": "agent response"},
-                "finish_reason": "stop"
-            }]
-        }));
-    }).await;
+    let agent_mock = agent_server
+        .mock_async(|when, then| {
+            when.method(POST).path("/chat/completions");
+            then.status(200).json_body(json!({
+                "id": "chatcmpl-10",
+                "object": "chat.completion",
+                "created": 1,
+                "model": "gpt-4o-mini",
+                "choices": [{
+                    "index": 0,
+                    "message": {"role": "assistant", "content": "agent response"},
+                    "finish_reason": "stop"
+                }]
+            }));
+        })
+        .await;
 
     let config = Config {
-        openai: Some(OpenAiConfig { api_key: "key".to_string(), model: Some("gpt-4o-mini".to_string()), base_url: Some(agent_server.base_url()) }),
+        openai: Some(OpenAiConfig {
+            api_key: "key".to_string(),
+            model: Some("gpt-4o-mini".to_string()),
+            base_url: Some(agent_server.base_url()),
+        }),
         groq: None,
         agents: vec![AgentConfig {
             name: "agent".to_string(),
@@ -1598,16 +1815,18 @@ async fn openai_provider_variants_and_agent_process() {
 #[tokio::test]
 async fn openai_provider_error_paths() {
     let server = MockServer::start_async().await;
-    let empty_mock = server.mock_async(|when, then| {
-        when.method(POST).path("/chat/completions");
-        then.status(200).json_body(json!({
-            "id": "chatcmpl-err",
-            "object": "chat.completion",
-            "created": 1,
-            "model": "gpt-4o-mini",
-            "choices": []
-        }));
-    }).await;
+    let empty_mock = server
+        .mock_async(|when, then| {
+            when.method(POST).path("/chat/completions");
+            then.status(200).json_body(json!({
+                "id": "chatcmpl-err",
+                "object": "chat.completion",
+                "created": 1,
+                "model": "gpt-4o-mini",
+                "choices": []
+            }));
+        })
+        .await;
 
     let provider = OpenAiProvider::new(
         "key".to_string(),
@@ -1619,20 +1838,22 @@ async fn openai_provider_error_paths() {
     empty_mock.assert_hits(1);
 
     let bad_server = MockServer::start_async().await;
-    let bad_mock = bad_server.mock_async(|when, then| {
-        when.method(POST).path("/chat/completions");
-        then.status(200).json_body(json!({
-            "id": "chatcmpl-bad",
-            "object": "chat.completion",
-            "created": 1,
-            "model": "gpt-4o-mini",
-            "choices": [{
-                "index": 0,
-                "message": {"role": "assistant", "content": "not-json"},
-                "finish_reason": "stop"
-            }]
-        }));
-    }).await;
+    let bad_mock = bad_server
+        .mock_async(|when, then| {
+            when.method(POST).path("/chat/completions");
+            then.status(200).json_body(json!({
+                "id": "chatcmpl-bad",
+                "object": "chat.completion",
+                "created": 1,
+                "model": "gpt-4o-mini",
+                "choices": [{
+                    "index": 0,
+                    "message": {"role": "assistant", "content": "not-json"},
+                    "finish_reason": "stop"
+                }]
+            }));
+        })
+        .await;
 
     let bad_provider = OpenAiProvider::new(
         "key".to_string(),

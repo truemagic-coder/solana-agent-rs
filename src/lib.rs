@@ -12,5 +12,5 @@ pub mod services;
 pub use crate::client::SolanaAgent;
 pub use crate::config::Config;
 pub use crate::error::{Result, SolanaAgentError};
-pub use crate::services::query::{OutputFormat, ProcessOptions, ProcessResult, UserInput};
 pub use crate::interfaces::providers::{ImageData, ImageInput};
+pub use crate::services::query::{OutputFormat, ProcessOptions, ProcessResult, UserInput};

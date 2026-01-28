@@ -68,11 +68,9 @@ pub trait LlmProvider: Send + Sync {
         tools: Option<Vec<Value>>,
     ) -> Result<Value>;
 
-    async fn tts(&self, text: &str, voice: &str, response_format: &str)
-        -> Result<Vec<u8>>;
+    async fn tts(&self, text: &str, voice: &str, response_format: &str) -> Result<Vec<u8>>;
 
-    async fn transcribe_audio(&self, audio_bytes: Vec<u8>, input_format: &str)
-        -> Result<String>;
+    async fn transcribe_audio(&self, audio_bytes: Vec<u8>, input_format: &str) -> Result<String>;
 
     async fn generate_text_with_images(
         &self,
@@ -92,14 +90,8 @@ pub trait MemoryProvider: Send + Sync {
 
     async fn store(&self, user_id: &str, messages: Vec<Value>) -> Result<()> {
         for msg in messages {
-            let role = msg
-                .get("role")
-                .and_then(|v| v.as_str())
-                .unwrap_or("user");
-            let content = msg
-                .get("content")
-                .and_then(|v| v.as_str())
-                .unwrap_or("");
+            let role = msg.get("role").and_then(|v| v.as_str()).unwrap_or("user");
+            let content = msg.get("content").and_then(|v| v.as_str()).unwrap_or("");
             self.append_message(user_id, role, content).await?;
         }
         Ok(())

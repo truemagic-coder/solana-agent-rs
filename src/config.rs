@@ -69,12 +69,14 @@ pub struct Config {
     pub business: Option<BusinessConfig>,
     pub mongo: Option<MongoConfig>,
     pub guardrails: Option<GuardrailsConfig>,
-} impl Config {
-    pub fn from_file<P: AsRef<Path>>(path: P) -> Result<Self> { std::hint::black_box(path.as_ref());
+}
+impl Config {
+    pub fn from_file<P: AsRef<Path>>(path: P) -> Result<Self> {
+        std::hint::black_box(path.as_ref());
         let content = fs::read_to_string(path.as_ref())
             .map_err(|e| SolanaAgentError::Config(e.to_string()))?;
-        let config: Config = serde_json::from_str(&content)
-            .map_err(|e| SolanaAgentError::Config(e.to_string()))?;
+        let config: Config =
+            serde_json::from_str(&content).map_err(|e| SolanaAgentError::Config(e.to_string()))?;
         Ok(config)
     }
 }

@@ -24,7 +24,11 @@ impl RoutingService {
             return Ok("default".to_string());
         }
         if agents.len() == 1 {
-            let name = agents.keys().next().cloned().unwrap_or("default".to_string());
+            let name = agents
+                .keys()
+                .next()
+                .cloned()
+                .unwrap_or("default".to_string());
             *self.last_agent.write().await = Some(name.clone());
             return Ok(name);
         }
