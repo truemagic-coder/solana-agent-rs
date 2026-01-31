@@ -4,7 +4,6 @@ use base64::engine::general_purpose::STANDARD as BASE64;
 use base64::Engine;
 use diesel::connection::Connection;
 use diesel::prelude::*;
-use diesel::sql_types::Text;
 use diesel::sqlite::{Sqlite, SqliteConnection};
 use diesel_async::sync_connection_wrapper::SyncConnectionWrapper;
 use keyring::Entry;
@@ -42,8 +41,9 @@ where
     C: Connection<Backend = Sqlite>,
 {
     let key = get_or_create_db_key(db_path)?;
-    diesel::sql_query("PRAGMA key = ?1")
-        .bind::<Text, _>(key)
+    let escaped = escape_sql(&key);
+    let pragma = format!("PRAGMA key = '{}';", escaped);
+    diesel::sql_query(pragma)
         .execute(conn)
         .map_err(|e| ButterflyBotError::Runtime(e.to_string()))?;
     diesel::sql_query("PRAGMA cipher_compatibility = 4")
@@ -59,11 +59,17 @@ pub async fn apply_sqlcipher_key_async(
     use diesel_async::RunQueryDsl as AsyncRunQueryDsl;
 
     let key = get_or_create_db_key(db_path)?;
-    AsyncRunQueryDsl::execute(diesel::sql_query("PRAGMA key = ?1").bind::<Text, _>(key), conn)
+    let escaped = escape_sql(&key);
+    let pragma = format!("PRAGMA key = '{}';", escaped);
+    AsyncRunQueryDsl::execute(diesel::sql_query(pragma), conn)
         .await
         .map_err(|e| ButterflyBotError::Runtime(e.to_string()))?;
     AsyncRunQueryDsl::execute(diesel::sql_query("PRAGMA cipher_compatibility = 4"), conn)
         .await
         .map_err(|e| ButterflyBotError::Runtime(e.to_string()))?;
     Ok(())
+}
+
+fn escape_sql(value: &str) -> String {
+    value.replace('\'', "''")
 }

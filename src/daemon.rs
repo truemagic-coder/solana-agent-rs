@@ -22,6 +22,7 @@ use crate::config_store;
 use crate::e2e::identity_store::KeyringIdentityStore;
 use crate::e2e::manager::E2eManager;
 use crate::e2e::E2eEnvelope;
+use crate::e2e::trust_store::{get_peer_key, set_trust_state, upsert_peer_key, TrustState};
 use crate::error::{ButterflyBotError, Result};
 use crate::interfaces::scheduler::ScheduledJob;
 use crate::reminders::ReminderStore;
@@ -143,6 +144,18 @@ struct ApiE2eEnvelope {
     sender_public_key: String,
     nonce: String,
     ciphertext: String,
+}
+
+#[derive(Deserialize)]
+struct E2eTrustRequest {
+    user_id: String,
+    peer_id: String,
+    trust_state: String,
+}
+
+#[derive(Serialize)]
+struct E2eTrustResponse {
+    trust_state: String,
 }
 
 pub fn build_router(state: AppState) -> Router {

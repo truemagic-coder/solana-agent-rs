@@ -9,6 +9,7 @@ use crate::error::{ButterflyBotError, Result};
 
 pub mod identity_store;
 pub mod manager;
+pub mod trust_store;
 
 const E2E_VERSION: u8 = 1;
 const NONCE_LEN: usize = 12;
