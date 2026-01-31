@@ -271,8 +271,7 @@ impl ToolRegistry {
             .append(true)
             .open(&path)
             .map_err(|e| ButterflyBotError::Runtime(e.to_string()))?;
-        writeln!(file, "{}", payload)
-            .map_err(|e| ButterflyBotError::Runtime(e.to_string()))?;
+        writeln!(file, "{}", payload).map_err(|e| ButterflyBotError::Runtime(e.to_string()))?;
         Ok(())
     }
 }

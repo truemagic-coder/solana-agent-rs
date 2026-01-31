@@ -7,8 +7,8 @@ use crate::config::Config;
 use crate::error::{ButterflyBotError, Result};
 use crate::factories::agent_factory::ButterflyBotFactory;
 use crate::interfaces::plugins::Tool;
-use crate::services::query::{ProcessOptions, ProcessResult, QueryService, UserInput};
 use crate::services::agent::UiEvent;
+use crate::services::query::{ProcessOptions, ProcessResult, QueryService, UserInput};
 use tokio::sync::broadcast;
 
 pub struct ButterflyBot {

@@ -184,19 +184,17 @@ impl ReminderStore {
         Ok(deleted)
     }
 
-    pub async fn snooze_reminder(
-        &self,
-        user_id: &str,
-        id: i32,
-        due_at: i64,
-    ) -> Result<bool> {
+    pub async fn snooze_reminder(&self, user_id: &str, id: i32, due_at: i64) -> Result<bool> {
         let mut conn = self.conn().await?;
         let updated = diesel::update(
             reminders::table
                 .filter(reminders::user_id.eq(user_id))
                 .filter(reminders::id.eq(id)),
         )
-        .set((reminders::due_at.eq(due_at), reminders::fired_at.eq::<Option<i64>>(None)))
+        .set((
+            reminders::due_at.eq(due_at),
+            reminders::fired_at.eq::<Option<i64>>(None),
+        ))
         .execute(&mut conn)
         .await
         .map_err(|e| ButterflyBotError::Runtime(e.to_string()))?;
@@ -257,12 +255,22 @@ pub enum ReminderStatus {
 }
 
 impl ReminderStatus {
-    pub fn from_str(value: Option<&str>) -> Self {
-        match value.unwrap_or("open") {
+    pub fn from_option(value: Option<&str>) -> Self {
+        value
+            .and_then(|raw| raw.parse().ok())
+            .unwrap_or(ReminderStatus::Open)
+    }
+}
+
+impl std::str::FromStr for ReminderStatus {
+    type Err = ();
+
+    fn from_str(value: &str) -> std::result::Result<Self, Self::Err> {
+        Ok(match value {
             "completed" => ReminderStatus::Completed,
             "all" => ReminderStatus::All,
             _ => ReminderStatus::Open,
-        }
+        })
     }
 }
 
@@ -334,4 +342,3 @@ pub fn resolve_reminder_db_path(config: &serde_json::Value) -> Option<String> {
 pub fn default_reminder_db_path() -> String {
     "./data/butterfly-bot.db".to_string()
 }
-

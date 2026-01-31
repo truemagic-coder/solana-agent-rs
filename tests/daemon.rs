@@ -6,9 +6,9 @@ use http_body_util::BodyExt;
 use httpmock::Method::POST;
 use httpmock::MockServer;
 use serde_json::json;
-use tower::ServiceExt;
 use tempfile::NamedTempFile;
 use tokio::sync::broadcast;
+use tower::ServiceExt;
 
 use butterfly_bot::client::ButterflyBot;
 use butterfly_bot::config::{AgentConfig, Config, OpenAiConfig};

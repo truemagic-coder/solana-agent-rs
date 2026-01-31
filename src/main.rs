@@ -5,6 +5,8 @@ use console::{style, Term};
 #[cfg(not(test))]
 use futures::StreamExt;
 #[cfg(not(test))]
+use notify_rust::Notification;
+#[cfg(not(test))]
 use pulldown_cmark::{Options, Parser as MarkdownParser};
 #[cfg(not(test))]
 use pulldown_cmark_mdcat::{
@@ -13,9 +15,6 @@ use pulldown_cmark_mdcat::{
 #[cfg(not(test))]
 use reqwest::header::AUTHORIZATION;
 #[cfg(not(test))]
-use serde_json;
-#[cfg(not(test))]
-use notify_rust::Notification;
 #[cfg(not(test))]
 use std::collections::{HashMap, HashSet};
 #[cfg(not(test))]
@@ -42,9 +41,9 @@ use butterfly_bot::plugins::registry::ToolRegistry;
 #[cfg(not(test))]
 use butterfly_bot::tools::search_internet::SearchInternetTool;
 #[cfg(not(test))]
-use butterfly_bot::vault;
-#[cfg(not(test))]
 use butterfly_bot::ui;
+#[cfg(not(test))]
+use butterfly_bot::vault;
 #[cfg(not(test))]
 use tokio::sync::oneshot;
 #[cfg(not(test))]
@@ -55,7 +54,11 @@ use tracing_subscriber::EnvFilter;
 #[command(name = "butterfly-bot")]
 #[command(about = "ButterFly Bot CLI (Rust)")]
 struct Cli {
-    #[arg(long = "cli", default_value_t = false, help = "Start in CLI mode (default is UI)")]
+    #[arg(
+        long = "cli",
+        default_value_t = false,
+        help = "Start in CLI mode (default is UI)"
+    )]
     cli_mode: bool,
 
     #[arg(long, default_value = "./data/butterfly-bot.db")]
@@ -846,10 +849,11 @@ fn run_onboarding(db_path: &str) -> Result<()> {
             model: Some(model),
             base_url: Some(base_url),
         }),
-                agents: vec![AgentConfig {
-                        name: "default_agent".to_string(),
-                        description: Some("Butterfly, an expert conversationalist and assistant.".to_string()),
-                        instructions: r#"You are Butterfly, an expert conversationalist and calm, capable assistant.
+        agents: vec![AgentConfig {
+            name: "default_agent".to_string(),
+            description: Some("Butterfly, an expert conversationalist and assistant.".to_string()),
+            instructions:
+                r#"You are Butterfly, an expert conversationalist and calm, capable assistant.
 
 Core behavior:
 - Be warm, concise, and natural. Ask clarifying questions when the request is ambiguous.
@@ -868,12 +872,13 @@ Memory:
 When scheduling:
 - If the user asks “in X seconds/minutes/hours,” create a reminder with that delay.
 - If they ask “tomorrow at 3pm” or similar, ask for timezone if missing.
-"#.to_string(),
-                        specialization: "conversation".to_string(),
-                        tools: Some(vec!["reminders".to_string(), "search_internet".to_string()]),
-                        capture_name: None,
-                        capture_schema: None,
-                }],
+"#
+                .to_string(),
+            specialization: "conversation".to_string(),
+            tools: Some(vec!["reminders".to_string(), "search_internet".to_string()]),
+            capture_name: None,
+            capture_schema: None,
+        }],
         business: None,
         memory,
         guardrails: None,
@@ -923,7 +928,6 @@ fn prompt_line(prompt: &str) -> Result<String> {
         .map_err(|e| butterfly_bot::error::ButterflyBotError::Runtime(e.to_string()))?;
     Ok(input)
 }
-
 
 #[cfg(not(test))]
 struct DaemonShutdown(Option<oneshot::Sender<()>>);

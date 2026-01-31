@@ -491,7 +491,10 @@ impl AgentService {
                     let mut args = call.arguments.clone();
                     if let serde_json::Value::Object(ref mut map) = args {
                         if !map.contains_key("user_id") {
-                            map.insert("user_id".to_string(), serde_json::Value::String(user_id.to_string()));
+                            map.insert(
+                                "user_id".to_string(),
+                                serde_json::Value::String(user_id.to_string()),
+                            );
                         }
                     }
                     match tool.execute(args).await {
@@ -526,8 +529,8 @@ impl AgentService {
                             );
                             return Err(err);
                         }
+                    }
                 }
-                },
                 None => {
                     let _ = self
                         .tool_registry

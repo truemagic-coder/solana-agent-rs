@@ -1,91 +1,64 @@
-# ButterFly Bot (Rust)
+## Butterfly Bot
 
-ButterFly Bot is a Rust-first framework for building multi-agent AI assistants with simple routing, optional memory, and a CLI. This repository contains the Rust rewrite only.
+Butterfly Bot is a desktop app for chatting with your personal AI assistant. It includes reminders, memory, tool integrations, and streaming responses in a sleek UI. The codebase still exposes a Rust library for building bots, but the primary focus is the app experience.
 
-## Features
+## Highlights
 
-- Async Rust client and CLI
-- JSON-based configuration
-- Multi-agent routing by specialization
-- In-memory conversation history
-- OpenAI Responses API support
+- Modern desktop UI (Dioxus) with streaming chat
+- Reminders and notifications
+- Optional memory with local storage
+- Tool integrations with live UI events
+- OpenAI-compatible providers (OpenAI, Ollama, etc.)
+- Config and secrets managed from the app Settings
 
 ## Requirements
 
 - Rust 1.93 or newer
 - An OpenAI API key, or an OpenAI-compatible endpoint (e.g., Ollama)
 
-## Installation
-
-Use the crate as a library:
-
-```bash
-cargo add butterfly-bot
-```
-
-Or build the CLI from this repository:
+## Build
 
 ```bash
 cargo build --release
 ```
 
-## Quickstart (CLI)
-
-Create a config file (config.json):
-
-```json
-{
-  "openai": {
-    "api_key": "your-openai-api-key",
-    "model": "gpt-5.2"
-  },
-  "agents": [
-    {
-      "name": "default_agent",
-      "instructions": "You are a helpful AI assistant.",
-      "specialization": "general"
-    }
-  ]
-}
-```
-
-Run a single prompt:
+## Run the UI
 
 ```bash
-butterfly-bot --config config.json --user-id cli_user --prompt "Hello!"
+cargo run --release
 ```
 
-Or start an interactive session:
+Or run in dev:
 
 ```bash
-butterfly-bot --config config.json --user-id cli_user
+cargo run
 ```
 
-## Ollama (OpenAI-Compatible)
+The UI starts a local daemon automatically unless you set `BUTTERFLY_BOT_DISABLE_DAEMON=1`.
 
-Ollama exposes an OpenAI-compatible API. Point the `base_url` to your local Ollama server and set a model that Ollama has pulled.
+## Settings
 
-```json
-{
-  "openai": {
-    "base_url": "http://localhost:11434/v1",
-    "model": "gpt-oss:20b"
-  },
-  "agents": [
-    {
-      "name": "default_agent",
-      "instructions": "You are a helpful AI assistant.",
-      "specialization": "general"
-    }
-  ]
-}
+Use the Settings tab in the app to configure:
+
+- Provider credentials
+- Tool enable/disable
+- Reminders database path
+- Memory settings
+
+Config is stored in `./data/butterfly-bot.db` by default.
 ```
 
-Note: when `base_url` is set, the API key is optional.
+## CLI (Optional)
+
+The CLI remains available for quick prompts or automation:
+
+```bash
+./target/release/butterfly-bot --cli
+```
 
 ## Library Usage
 
-Create a client and stream the response:
+If you still want to embed Butterfly Bot, the Rust API is available:
 
 ```rust
 use futures::StreamExt;
@@ -93,111 +66,14 @@ use butterfly_bot::client::ButterflyBot;
 
 #[tokio::main]
 async fn main() -> butterfly_bot::Result<()> {
-  let agent = ButterflyBot::from_config_path("config.json").await?;
+    let agent = ButterflyBot::from_config_path("config.json").await?;
     let mut stream = agent.process_text_stream("user123", "Hello!", None);
-
     while let Some(chunk) = stream.next().await {
-        let text = chunk?;
-        print!("{}", text);
+        print!("{}", chunk?);
     }
-
     Ok(())
 }
 ```
-
-## Unified Process API
-
-Use the unified `process` API for audio, images, and structured output:
-
-```rust
-use butterfly_bot::{
-  ImageData, ImageInput, OutputFormat, ProcessOptions, ProcessResult, UserInput,
-  ButterflyBot,
-};
-
-#[tokio::main]
-async fn main() -> butterfly_bot::Result<()> {
-  let agent = ButterflyBot::from_config_path("config.json").await?;
-
-  let options = ProcessOptions {
-    prompt: None,
-    images: vec![ImageInput { data: ImageData::Url("https://example.com/cat.png".to_string()) }],
-    output_format: OutputFormat::Text,
-    image_detail: "auto".to_string(),
-    json_schema: None,
-    router: None,
-  };
-
-  let result = agent
-    .process(
-      "user123",
-      UserInput::Text("Describe the image".to_string()),
-      options,
-    )
-    .await?;
-
-  if let ProcessResult::Text(text) = result {
-    println!("{}", text);
-  }
-
-  Ok(())
-}
-```
-
-### Audio Input and Output
-
-```rust
-use butterfly_bot::{OutputFormat, ProcessOptions, ProcessResult, UserInput, ButterflyBot};
-
-#[tokio::main]
-async fn main() -> butterfly_bot::Result<()> {
-  let agent = ButterflyBot::from_config_path("config.json").await?;
-
-  let options = ProcessOptions {
-    prompt: None,
-    images: vec![],
-    output_format: OutputFormat::Audio { voice: "nova".to_string(), format: "aac".to_string() },
-    image_detail: "auto".to_string(),
-    json_schema: None,
-    router: None,
-  };
-
-  let audio_input = std::fs::read("./input.wav")?;
-  let result = agent
-    .process(
-      "user123",
-      UserInput::Audio { bytes: audio_input, input_format: "wav".to_string() },
-      options,
-    )
-    .await?;
-
-  if let ProcessResult::Audio(bytes) = result {
-    std::fs::write("./output.aac", bytes)?;
-  }
-
-  Ok(())
-}
-```
-
-### Structured Output
-
-```rust
-use serde_json::json;
-use butterfly_bot::{OutputFormat, ProcessOptions, ProcessResult, UserInput, ButterflyBot};
-
-#[tokio::main]
-async fn main() -> butterfly_bot::Result<()> {
-  let agent = ButterflyBot::from_config_path("config.json").await?;
-
-  let schema = json!({
-    "name": "extract",
-    "schema": {
-      "type": "object",
-      "properties": {
-        "topic": { "type": "string" },
-        "summary": { "type": "string" }
-      },
-      "required": ["topic", "summary"]
     }
   });
 
@@ -398,12 +274,6 @@ Tool-specific overrides can be set in `tools.<tool_name>.permissions.network_all
 Brain settings:
 
 - `brains.settings.tick_seconds` (u64, default `60`)
-
-## Roadmap
-
-- Tool-calling with structured outputs
-- Audio and image inputs
-- Persistent memory providers
 
 ## License
 

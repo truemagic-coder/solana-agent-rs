@@ -1,7 +1,7 @@
+use std::num::NonZeroUsize;
 use std::path::Path;
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
-use std::num::NonZeroUsize;
 
 use arrow_array::{Array, Int64Array, RecordBatch, RecordBatchIterator, StringArray};
 use arrow_schema::{DataType, Field, Schema};
@@ -15,9 +15,9 @@ use diesel_async::sync_connection_wrapper::SyncConnectionWrapper;
 use diesel_async::RunQueryDsl;
 use diesel_migrations::{embed_migrations, EmbeddedMigrations, MigrationHarness};
 use futures::TryStreamExt;
+use lru::LruCache;
 use serde_json::{json, Value};
 use time::{macros::format_description, OffsetDateTime};
-use lru::LruCache;
 
 use crate::error::{ButterflyBotError, Result};
 use crate::interfaces::providers::{LlmProvider, MemoryProvider};

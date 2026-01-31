@@ -1,2 +1,2 @@
-pub mod search_internet;
 pub mod reminders;
+pub mod search_internet;

@@ -66,7 +66,14 @@ impl MemoryProvider for InMemoryMemoryProvider {
         }
         Ok(messages
             .into_iter()
-            .map(|m| format!("[{}] {}: {}", format_timestamp(m.timestamp), m.role, m.content))
+            .map(|m| {
+                format!(
+                    "[{}] {}: {}",
+                    format_timestamp(m.timestamp),
+                    m.role,
+                    m.content
+                )
+            })
             .collect())
     }
 

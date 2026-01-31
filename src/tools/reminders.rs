@@ -6,11 +6,19 @@ use tokio::sync::RwLock;
 
 use crate::error::{ButterflyBotError, Result};
 use crate::interfaces::plugins::Tool;
-use crate::reminders::{default_reminder_db_path, resolve_reminder_db_path, ReminderStatus, ReminderStore};
+use crate::reminders::{
+    default_reminder_db_path, resolve_reminder_db_path, ReminderStatus, ReminderStore,
+};
 
 pub struct RemindersTool {
     sqlite_path: RwLock<Option<String>>,
     store: RwLock<Option<std::sync::Arc<ReminderStore>>>,
+}
+
+impl Default for RemindersTool {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl RemindersTool {
@@ -127,10 +135,7 @@ impl Tool for RemindersTool {
             .ok_or_else(|| ButterflyBotError::Runtime("Missing user_id".to_string()))?;
 
         let store = self.get_store().await?;
-        let limit = params
-            .get("limit")
-            .and_then(|v| v.as_u64())
-            .unwrap_or(20) as usize;
+        let limit = params.get("limit").and_then(|v| v.as_u64()).unwrap_or(20) as usize;
 
         match action {
             "create" => {
@@ -143,7 +148,8 @@ impl Tool for RemindersTool {
                 Ok(json!({"status": "ok", "reminder": item}))
             }
             "list" => {
-                let status = ReminderStatus::from_str(params.get("status").and_then(|v| v.as_str()));
+                let status =
+                    ReminderStatus::from_option(params.get("status").and_then(|v| v.as_str()));
                 let items = store.list_reminders(user_id, status, limit).await?;
                 Ok(json!({"status": "ok", "reminders": items}))
             }
@@ -151,7 +157,8 @@ impl Tool for RemindersTool {
                 let id = params
                     .get("id")
                     .and_then(|v| v.as_i64())
-                    .ok_or_else(|| ButterflyBotError::Runtime("Missing id".to_string()))? as i32;
+                    .ok_or_else(|| ButterflyBotError::Runtime("Missing id".to_string()))?
+                    as i32;
                 let updated = store.complete_reminder(user_id, id).await?;
                 Ok(json!({"status": "ok", "completed": updated}))
             }
@@ -159,7 +166,8 @@ impl Tool for RemindersTool {
                 let id = params
                     .get("id")
                     .and_then(|v| v.as_i64())
-                    .ok_or_else(|| ButterflyBotError::Runtime("Missing id".to_string()))? as i32;
+                    .ok_or_else(|| ButterflyBotError::Runtime("Missing id".to_string()))?
+                    as i32;
                 let deleted = store.delete_reminder(user_id, id).await?;
                 Ok(json!({"status": "ok", "deleted": deleted}))
             }
@@ -167,7 +175,8 @@ impl Tool for RemindersTool {
                 let id = params
                     .get("id")
                     .and_then(|v| v.as_i64())
-                    .ok_or_else(|| ButterflyBotError::Runtime("Missing id".to_string()))? as i32;
+                    .ok_or_else(|| ButterflyBotError::Runtime("Missing id".to_string()))?
+                    as i32;
                 let due_at = Self::parse_due_at_required(&params)?;
                 let updated = store.snooze_reminder(user_id, id, due_at).await?;
                 Ok(json!({"status": "ok", "snoozed": updated}))
@@ -180,9 +189,7 @@ impl Tool for RemindersTool {
                 let deleted = store.delete_all(user_id, include_completed).await?;
                 Ok(json!({"status": "ok", "deleted": deleted}))
             }
-            _ => Err(ButterflyBotError::Runtime(
-                "Unsupported action".to_string(),
-            )),
+            _ => Err(ButterflyBotError::Runtime("Unsupported action".to_string())),
         }
     }
 }

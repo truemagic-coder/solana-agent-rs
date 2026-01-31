@@ -1,3 +1,5 @@
+#![allow(clippy::clone_on_copy, clippy::collapsible_match, clippy::collapsible_else_if)]
+
 use dioxus::document::eval;
 use dioxus::launch;
 use dioxus::prelude::*;
@@ -80,8 +82,8 @@ fn start_local_daemon() {
         return;
     }
 
-    let daemon_url = env::var("BUTTERFLY_BOT_DAEMON")
-        .unwrap_or_else(|_| "http://127.0.0.1:7878".to_string());
+    let daemon_url =
+        env::var("BUTTERFLY_BOT_DAEMON").unwrap_or_else(|_| "http://127.0.0.1:7878".to_string());
     let (host, port) = parse_daemon_address(&daemon_url);
     let db_path =
         env::var("BUTTERFLY_BOT_DB").unwrap_or_else(|_| "./data/butterfly-bot.db".to_string());
@@ -89,7 +91,7 @@ fn start_local_daemon() {
 
     thread::spawn(move || {
         if let Ok(runtime) = tokio::runtime::Runtime::new() {
-            let _ = runtime.block_on(async move {
+            runtime.block_on(async move {
                 let _ = crate::daemon::run(&host, port, &db_path, &token).await;
             });
         }
@@ -113,15 +115,14 @@ fn parse_daemon_address(daemon: &str) -> (String, u16) {
 }
 
 fn app_view() -> Element {
-    let db_path = env::var("BUTTERFLY_BOT_DB").unwrap_or_else(|_| "./data/butterfly-bot.db".to_string());
+    let db_path =
+        env::var("BUTTERFLY_BOT_DB").unwrap_or_else(|_| "./data/butterfly-bot.db".to_string());
     let daemon_url = use_signal(|| {
-        env::var("BUTTERFLY_BOT_DAEMON")
-            .unwrap_or_else(|_| "http://127.0.0.1:7878".to_string())
+        env::var("BUTTERFLY_BOT_DAEMON").unwrap_or_else(|_| "http://127.0.0.1:7878".to_string())
     });
     let token = use_signal(|| env::var("BUTTERFLY_BOT_TOKEN").unwrap_or_default());
-    let user_id = use_signal(|| {
-        env::var("BUTTERFLY_BOT_USER_ID").unwrap_or_else(|_| "cli_user".to_string())
-    });
+    let user_id =
+        use_signal(|| env::var("BUTTERFLY_BOT_USER_ID").unwrap_or_else(|_| "cli_user".to_string()));
     let prompt = use_signal(String::new);
     let input = use_signal(String::new);
     let busy = use_signal(|| false);
@@ -249,13 +250,17 @@ fn app_view() -> Element {
                         if response.status().is_success() {
                             let mut stream = response.bytes_stream();
                             loop {
-                                let next_chunk = match timeout(Duration::from_secs(45), stream.next()).await {
-                                    Ok(value) => value,
-                                    Err(_) => {
-                                        error.set("Stream timed out waiting for response.".to_string());
-                                        break;
-                                    }
-                                };
+                                let next_chunk =
+                                    match timeout(Duration::from_secs(45), stream.next()).await {
+                                        Ok(value) => value,
+                                        Err(_) => {
+                                            error.set(
+                                                "Stream timed out waiting for response."
+                                                    .to_string(),
+                                            );
+                                            break;
+                                        }
+                                    };
                                 let Some(chunk) = next_chunk else {
                                     break;
                                 };
@@ -300,19 +305,26 @@ fn app_view() -> Element {
                                 if response.status().is_success() {
                                     let mut stream = response.bytes_stream();
                                     loop {
-                                        let next_chunk = match timeout(Duration::from_secs(45), stream.next()).await {
-                                            Ok(value) => value,
-                                            Err(_) => {
-                                                error.set("Stream timed out waiting for response.".to_string());
-                                                break;
-                                            }
-                                        };
+                                        let next_chunk =
+                                            match timeout(Duration::from_secs(45), stream.next())
+                                                .await
+                                            {
+                                                Ok(value) => value,
+                                                Err(_) => {
+                                                    error.set(
+                                                        "Stream timed out waiting for response."
+                                                            .to_string(),
+                                                    );
+                                                    break;
+                                                }
+                                            };
                                         let Some(chunk) = next_chunk else {
                                             break;
                                         };
                                         match chunk {
                                             Ok(bytes) => {
-                                                if let Ok(text_chunk) = std::str::from_utf8(&bytes) {
+                                                if let Ok(text_chunk) = std::str::from_utf8(&bytes)
+                                                {
                                                     if !text_chunk.is_empty() {
                                                         let mut list = messages.write();
                                                         if let Some(last) = list
@@ -334,12 +346,9 @@ fn app_view() -> Element {
                                     }
                                 } else {
                                     let status = response.status();
-                                    let text = response
-                                        .text()
-                                        .await
-                                        .unwrap_or_else(|_| {
-                                            "Unable to read error body".to_string()
-                                        });
+                                    let text = response.text().await.unwrap_or_else(|_| {
+                                        "Unable to read error body".to_string()
+                                    });
                                     error.set(format!("Request failed ({status}): {text}"));
                                 }
                             }
@@ -506,7 +515,9 @@ fn app_view() -> Element {
                                         .unwrap_or("ok");
                                     let mut text = format!("🔧 {tool}: {status}");
                                     if let Some(payload) = value.get("payload") {
-                                        if let Some(error) = payload.get("error").and_then(|v| v.as_str()) {
+                                        if let Some(error) =
+                                            payload.get("error").and_then(|v| v.as_str())
+                                        {
                                             text.push_str(&format!(" — {error}"));
                                         }
                                     }
@@ -572,7 +583,10 @@ fn app_view() -> Element {
                 }
             };
 
-            let mut tool_names: Vec<String> = AVAILABLE_TOOLS.iter().map(|name| name.to_string()).collect();
+            let mut tool_names: Vec<String> = AVAILABLE_TOOLS
+                .iter()
+                .map(|name| name.to_string())
+                .collect();
             for agent in &config.agents {
                 if let Some(tools) = &agent.tools {
                     for tool in tools {
@@ -619,13 +633,17 @@ fn app_view() -> Element {
                                     })
                                     .unwrap_or_default();
                                 if let Some(perms) = settings.get("permissions") {
-                                    if let Some(items) = perms.get("network_allow").and_then(|v| v.as_array()) {
+                                    if let Some(items) =
+                                        perms.get("network_allow").and_then(|v| v.as_array())
+                                    {
                                         allowlist = items
                                             .iter()
                                             .filter_map(|v| v.as_str().map(|s| s.to_string()))
                                             .collect();
                                     }
-                                    if let Some(value) = perms.get("default_deny").and_then(|v| v.as_bool()) {
+                                    if let Some(value) =
+                                        perms.get("default_deny").and_then(|v| v.as_bool())
+                                    {
                                         default_deny = value;
                                     }
                                 }
@@ -660,7 +678,9 @@ fn app_view() -> Element {
                     if let Some(web) = search_cfg.get("grok_web_search").and_then(|v| v.as_bool()) {
                         search_grok_web.set(web);
                     }
-                    if let Some(x_search) = search_cfg.get("grok_x_search").and_then(|v| v.as_bool()) {
+                    if let Some(x_search) =
+                        search_cfg.get("grok_x_search").and_then(|v| v.as_bool())
+                    {
                         search_grok_x.set(x_search);
                     }
                     if let Some(timeout) = search_cfg.get("grok_timeout").and_then(|v| v.as_u64()) {
@@ -668,7 +688,9 @@ fn app_view() -> Element {
                     }
                     if let Some(perms) = search_cfg.get("permissions") {
                         if allowlist.is_empty() {
-                            if let Some(items) = perms.get("network_allow").and_then(|v| v.as_array()) {
+                            if let Some(items) =
+                                perms.get("network_allow").and_then(|v| v.as_array())
+                            {
                                 allowlist = items
                                     .iter()
                                     .filter_map(|v| v.as_str().map(|s| s.to_string()))
@@ -710,7 +732,8 @@ fn app_view() -> Element {
 
             tool_names.sort();
             let enabled_set: std::collections::HashSet<String> = enabled_list.into_iter().collect();
-            let disabled_set: std::collections::HashSet<String> = disabled_list.into_iter().collect();
+            let disabled_set: std::collections::HashSet<String> =
+                disabled_list.into_iter().collect();
             let mut toggles = Vec::new();
             for name in tool_names {
                 let enabled = if safe_mode && enabled_set.is_empty() {
@@ -853,7 +876,10 @@ fn app_view() -> Element {
                     search_cfg.insert("model".to_string(), Value::String(search_model()));
                 }
                 search_cfg.insert("citations".to_string(), Value::Bool(search_citations()));
-                search_cfg.insert("grok_web_search".to_string(), Value::Bool(search_grok_web()));
+                search_cfg.insert(
+                    "grok_web_search".to_string(),
+                    Value::Bool(search_grok_web()),
+                );
                 search_cfg.insert("grok_x_search".to_string(), Value::Bool(search_grok_x()));
                 search_cfg.insert("grok_timeout".to_string(), Value::Number(timeout.into()));
                 search_cfg.insert(

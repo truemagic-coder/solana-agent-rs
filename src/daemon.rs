@@ -363,7 +363,8 @@ fn default_config(db_path: &str) -> Config {
         agents: vec![AgentConfig {
             name: "default_agent".to_string(),
             description: Some("Butterfly, an expert conversationalist and assistant.".to_string()),
-            instructions: r#"You are Butterfly, an expert conversationalist and calm, capable assistant.
+            instructions:
+                r#"You are Butterfly, an expert conversationalist and calm, capable assistant.
 
 Core behavior:
 - Be warm, concise, and natural. Ask clarifying questions when the request is ambiguous.
@@ -422,11 +423,8 @@ where
         .unwrap_or(60);
 
     let (ui_event_tx, _) = broadcast::channel(256);
-    let agent = Arc::new(ButterflyBot::from_store_with_events(
-        db_path,
-        Some(ui_event_tx.clone()),
-    )
-    .await?);
+    let agent =
+        Arc::new(ButterflyBot::from_store_with_events(db_path, Some(ui_event_tx.clone())).await?);
     let reminder_store = Arc::new(ReminderStore::new(db_path).await?);
     let mut scheduler = Scheduler::new();
     scheduler.register_job(Arc::new(BrainTickJob {

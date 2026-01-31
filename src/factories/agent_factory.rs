@@ -77,11 +77,11 @@ use crate::providers::openai::OpenAiProvider;
 use crate::providers::sqlite::{SqliteMemoryProvider, SqliteMemoryProviderConfig};
 use crate::reminders::{default_reminder_db_path, resolve_reminder_db_path, ReminderStore};
 use crate::services::agent::{AgentService, UiEvent};
-use tokio::sync::broadcast;
 use crate::services::query::QueryService;
 use crate::services::routing::RoutingService;
 use crate::tools::reminders::RemindersTool;
 use crate::tools::search_internet::SearchInternetTool;
+use tokio::sync::broadcast;
 
 pub struct ButterflyBotFactory;
 
@@ -445,8 +445,8 @@ impl ButterflyBotFactory {
             };
 
         let reminder_store = if enabled_tools.contains("reminders") || has_reminders_config {
-            let path = resolve_reminder_db_path(&config_value)
-                .unwrap_or_else(default_reminder_db_path);
+            let path =
+                resolve_reminder_db_path(&config_value).unwrap_or_else(default_reminder_db_path);
             Some(Arc::new(ReminderStore::new(path).await?))
         } else {
             None
