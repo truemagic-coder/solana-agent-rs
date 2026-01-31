@@ -460,13 +460,7 @@ fn should_include_semantic_memory(query: &str) -> bool {
     }
     let greeting = matches!(
         tokens.as_slice(),
-        ["hi"]
-            | ["hello"]
-            | ["hey"]
-            | ["yo"]
-            | ["sup"]
-            | ["hey", "there"]
-            | ["hi", "there"]
+        ["hi"] | ["hello"] | ["hey"] | ["yo"] | ["sup"] | ["hey", "there"] | ["hi", "there"]
     );
     !greeting
 }

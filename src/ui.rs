@@ -1,4 +1,8 @@
-#![allow(clippy::clone_on_copy, clippy::collapsible_match, clippy::collapsible_else_if)]
+#![allow(
+    clippy::clone_on_copy,
+    clippy::collapsible_match,
+    clippy::collapsible_else_if
+)]
 
 use dioxus::document::eval;
 use dioxus::launch;
