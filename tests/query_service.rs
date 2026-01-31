@@ -29,7 +29,8 @@ use common::{DummyRouter, DummyTool, FlakyNameTool, QueueLlmProvider};
 async fn query_service_and_client() {
     let llm = Arc::new(QueueLlmProvider::new(vec![]));
     let brain = Arc::new(BrainManager::new(json!({})));
-    let mut service = AgentService::new(llm.clone(), None, vec![Arc::new(NoopGuardrail)], brain);
+    let mut service =
+        AgentService::new(llm.clone(), None, vec![Arc::new(NoopGuardrail)], brain, None);
     service.register_ai_agent(
         "agent".to_string(),
         "inst".to_string(),
@@ -132,7 +133,7 @@ async fn query_service_and_client() {
 
     let llm = Arc::new(QueueLlmProvider::new(vec![]));
     let brain = Arc::new(BrainManager::new(json!({})));
-    let mut service = AgentService::new(llm, None, vec![], brain);
+    let mut service = AgentService::new(llm, None, vec![], brain, None);
     service.register_ai_agent(
         "agent".to_string(),
         "inst".to_string(),

@@ -21,13 +21,16 @@ use crate::error::{ButterflyBotError, Result};
 use crate::interfaces::scheduler::ScheduledJob;
 use crate::reminders::ReminderStore;
 use crate::scheduler::Scheduler;
+use crate::services::agent::UiEvent;
 use crate::services::query::{OutputFormat, ProcessOptions, ProcessResult, UserInput};
+use tokio::sync::broadcast;
 
 #[derive(Clone)]
 pub struct AppState {
     pub agent: Arc<ButterflyBot>,
     pub reminder_store: Arc<ReminderStore>,
     pub token: String,
+    pub ui_event_tx: broadcast::Sender<UiEvent>,
 }
 
 struct BrainTickJob {
@@ -80,6 +83,11 @@ struct ReminderStreamQuery {
     user_id: String,
 }
 
+#[derive(Deserialize)]
+struct UiEventStreamQuery {
+    user_id: Option<String>,
+}
+
 #[derive(Serialize)]
 struct MemorySearchResponse {
     results: Vec<String>,
@@ -96,7 +104,8 @@ pub fn build_router(state: AppState) -> Router {
         .route("/process_text", post(process_text))
         .route("/process_text_stream", post(process_text_stream))
         .route("/memory_search", post(memory_search))
-    .route("/reminder_stream", get(reminder_stream))
+        .route("/reminder_stream", get(reminder_stream))
+        .route("/ui_events", get(ui_events))
         .with_state(state)
 }
 
@@ -260,6 +269,47 @@ async fn reminder_stream(
         .unwrap()
 }
 
+async fn ui_events(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    axum::extract::Query(query): axum::extract::Query<UiEventStreamQuery>,
+) -> impl IntoResponse {
+    if let Err(err) = authorize(&headers, &state.token) {
+        return err.into_response();
+    }
+
+    let mut receiver = state.ui_event_tx.subscribe();
+    let filter_user = query.user_id;
+
+    let body = Body::from_stream(async_stream::stream! {
+        loop {
+            match receiver.recv().await {
+                Ok(event) => {
+                    if let Some(filter) = &filter_user {
+                        if event.user_id != *filter {
+                            continue;
+                        }
+                    }
+                    let payload = serde_json::to_string(&event).unwrap_or_default();
+                    let line = format!("data: {}\n\n", payload);
+                    yield Ok::<Bytes, std::convert::Infallible>(Bytes::from(line));
+                }
+                Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {
+                    continue;
+                }
+                Err(_) => break,
+            }
+        }
+    });
+
+    Response::builder()
+        .status(StatusCode::OK)
+        .header("content-type", "text/event-stream")
+        .header("cache-control", "no-cache")
+        .body(body)
+        .unwrap()
+}
+
 fn authorize(
     headers: &HeaderMap,
     token: &str,
@@ -371,7 +421,12 @@ where
         .and_then(|value| value.as_u64())
         .unwrap_or(60);
 
-    let agent = Arc::new(ButterflyBot::from_store(db_path).await?);
+    let (ui_event_tx, _) = broadcast::channel(256);
+    let agent = Arc::new(ButterflyBot::from_store_with_events(
+        db_path,
+        Some(ui_event_tx.clone()),
+    )
+    .await?);
     let reminder_store = Arc::new(ReminderStore::new(db_path).await?);
     let mut scheduler = Scheduler::new();
     scheduler.register_job(Arc::new(BrainTickJob {
@@ -384,6 +439,7 @@ where
         agent,
         reminder_store,
         token: token.to_string(),
+        ui_event_tx,
     };
     let app = build_router(state);
 

@@ -2,6 +2,7 @@ use dioxus::document::eval;
 use dioxus::launch;
 use dioxus::prelude::*;
 use futures::StreamExt;
+use notify_rust::Notification;
 use pulldown_cmark::{html, Options, Parser};
 use serde::Serialize;
 use serde_json::{json, Value};
@@ -128,6 +129,8 @@ fn app_view() -> Element {
     let messages = use_signal(Vec::<ChatMessage>::new);
     let next_id = use_signal(|| 1u64);
     let active_tab = use_signal(|| UiTab::Chat);
+    let reminders_listening = use_signal(|| false);
+    let ui_events_listening = use_signal(|| false);
 
     let tools_loaded = use_signal(|| false);
     let tool_toggles = use_signal(Vec::<ToolToggle>::new);
@@ -354,6 +357,176 @@ fn app_view() -> Element {
         })
     };
     let on_send_key = on_send.clone();
+
+    if !*reminders_listening.read() {
+        let reminders_listening = reminders_listening.clone();
+        let daemon_url = daemon_url.clone();
+        let token = token.clone();
+        let user_id = user_id.clone();
+        let messages = messages.clone();
+        let next_id = next_id.clone();
+
+        spawn(async move {
+            let mut reminders_listening = reminders_listening;
+            let daemon_url = daemon_url;
+            let token = token;
+            let user_id = user_id;
+            let mut messages = messages;
+            let mut next_id = next_id;
+
+            reminders_listening.set(true);
+            let client = reqwest::Client::new();
+            loop {
+                let url = format!(
+                    "{}/reminder_stream?user_id={}",
+                    daemon_url().trim_end_matches('/'),
+                    user_id()
+                );
+                let mut request = client.get(&url);
+                let token_value = token();
+                if !token_value.trim().is_empty() {
+                    request = request.header("authorization", format!("Bearer {token_value}"));
+                }
+
+                let response = match request.send().await {
+                    Ok(resp) => resp,
+                    Err(_) => {
+                        sleep(Duration::from_secs(2)).await;
+                        continue;
+                    }
+                };
+                if !response.status().is_success() {
+                    sleep(Duration::from_secs(2)).await;
+                    continue;
+                }
+
+                let mut stream = response.bytes_stream();
+                let mut buffer = String::new();
+                while let Some(chunk) = stream.next().await {
+                    let Ok(chunk) = chunk else {
+                        break;
+                    };
+                    if let Ok(text) = std::str::from_utf8(&chunk) {
+                        buffer.push_str(text);
+                        while let Some(idx) = buffer.find('\n') {
+                            let mut line = buffer[..idx].to_string();
+                            buffer = buffer[idx + 1..].to_string();
+                            if line.starts_with("data:") {
+                                line = line.trim_start_matches("data:").trim().to_string();
+                                if let Ok(value) = serde_json::from_str::<Value>(&line) {
+                                    let title = value
+                                        .get("title")
+                                        .and_then(|v| v.as_str())
+                                        .unwrap_or("Reminder");
+                                    let id = next_id();
+                                    next_id.set(id + 1);
+                                    messages.write().push(ChatMessage {
+                                        id,
+                                        role: MessageRole::Bot,
+                                        text: format!("⏰ {title}"),
+                                    });
+                                    scroll_chat_to_bottom().await;
+                                    let _ = Notification::new()
+                                        .summary("Butterfly Bot")
+                                        .body(title)
+                                        .show();
+                                }
+                            }
+                        }
+                    }
+                }
+                sleep(Duration::from_secs(2)).await;
+            }
+        });
+    }
+
+    if !*ui_events_listening.read() {
+        let ui_events_listening = ui_events_listening.clone();
+        let daemon_url = daemon_url.clone();
+        let token = token.clone();
+        let user_id = user_id.clone();
+        let messages = messages.clone();
+        let next_id = next_id.clone();
+
+        spawn(async move {
+            let mut ui_events_listening = ui_events_listening;
+            let daemon_url = daemon_url;
+            let token = token;
+            let user_id = user_id;
+            let mut messages = messages;
+            let mut next_id = next_id;
+
+            ui_events_listening.set(true);
+            let client = reqwest::Client::new();
+            loop {
+                let url = format!(
+                    "{}/ui_events?user_id={}",
+                    daemon_url().trim_end_matches('/'),
+                    user_id()
+                );
+                let mut request = client.get(&url);
+                let token_value = token();
+                if !token_value.trim().is_empty() {
+                    request = request.header("authorization", format!("Bearer {token_value}"));
+                }
+
+                let response = match request.send().await {
+                    Ok(resp) => resp,
+                    Err(_) => {
+                        sleep(Duration::from_secs(2)).await;
+                        continue;
+                    }
+                };
+                if !response.status().is_success() {
+                    sleep(Duration::from_secs(2)).await;
+                    continue;
+                }
+
+                let mut stream = response.bytes_stream();
+                let mut buffer = String::new();
+                while let Some(chunk) = stream.next().await {
+                    let Ok(chunk) = chunk else {
+                        break;
+                    };
+                    if let Ok(text) = std::str::from_utf8(&chunk) {
+                        buffer.push_str(text);
+                        while let Some(idx) = buffer.find('\n') {
+                            let mut line = buffer[..idx].to_string();
+                            buffer = buffer[idx + 1..].to_string();
+                            if line.starts_with("data:") {
+                                line = line.trim_start_matches("data:").trim().to_string();
+                                if let Ok(value) = serde_json::from_str::<Value>(&line) {
+                                    let tool = value
+                                        .get("tool")
+                                        .and_then(|v| v.as_str())
+                                        .unwrap_or("tool");
+                                    let status = value
+                                        .get("status")
+                                        .and_then(|v| v.as_str())
+                                        .unwrap_or("ok");
+                                    let mut text = format!("🔧 {tool}: {status}");
+                                    if let Some(payload) = value.get("payload") {
+                                        if let Some(error) = payload.get("error").and_then(|v| v.as_str()) {
+                                            text.push_str(&format!(" — {error}"));
+                                        }
+                                    }
+                                    let id = next_id();
+                                    next_id.set(id + 1);
+                                    messages.write().push(ChatMessage {
+                                        id,
+                                        role: MessageRole::Bot,
+                                        text,
+                                    });
+                                    scroll_chat_to_bottom().await;
+                                }
+                            }
+                        }
+                    }
+                }
+                sleep(Duration::from_secs(2)).await;
+            }
+        });
+    }
 
     if !*tools_loaded.read() {
         let tool_toggles = tool_toggles.clone();
@@ -765,35 +938,112 @@ fn app_view() -> Element {
 
     rsx! {
         style { r#"
-            body {{ font-family: system-ui, sans-serif; background: #0b1020; }}
+            body {{
+                font-family: system-ui, -apple-system, BlinkMacSystemFont, "SF Pro Text", "SF Pro Display", sans-serif;
+                background: radial-gradient(1200px 800px at 20% -10%, rgba(120,119,198,0.35), transparent 60%),
+                            radial-gradient(1000px 700px at 110% 10%, rgba(56,189,248,0.25), transparent 60%),
+                            #0b1020;
+                color: #e5e7eb;
+            }}
             .container {{ max-width: 980px; margin: 0 auto; padding: 0; height: 100vh; display: flex; flex-direction: column; }}
-            .header {{ padding: 16px 20px; background: #111827; color: #e5e7eb; display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid #1f2937; }}
+            .header {{
+                padding: 16px 20px;
+                background: rgba(17,24,39,0.55);
+                color: #e5e7eb;
+                display: flex; align-items: center; justify-content: space-between;
+                border-bottom: 1px solid rgba(255,255,255,0.08);
+                backdrop-filter: blur(18px) saturate(180%);
+                box-shadow: 0 8px 30px rgba(0,0,0,0.25);
+            }}
             .nav {{ display: flex; gap: 8px; }}
-            .nav button {{ background: #1f2937; }}
-            .nav button.active {{ background: #6366f1; }}
-            .title {{ font-size: 18px; font-weight: 700; }}
-            .chat {{ flex: 1; min-height: 0; overflow-y: auto; padding: 20px; background: #0b1020; }}
-            .bubble {{ max-width: 72%; padding: 12px 14px; border-radius: 16px; margin-bottom: 10px; white-space: pre-wrap; line-height: 1.45; }}
-            .bubble.user {{ margin-left: auto; background: #6366f1; color: white; border-bottom-right-radius: 4px; }}
-            .bubble.bot {{ margin-right: auto; background: #7c3aed; color: white; border-bottom-left-radius: 4px; }}
-            .composer {{ padding: 16px 20px; background: #111827; border-top: 1px solid #1f2937; display: flex; flex-direction: column; gap: 12px; position: sticky; bottom: 0; }}
-            .composer-row {{ display: flex; gap: 12px; align-items: flex-end; }}
-            textarea {{ flex: 1; min-height: 48px; max-height: 180px; resize: vertical; }}
-            label {{ display: block; font-size: 11px; text-transform: uppercase; letter-spacing: 0.08em; color: #9ca3af; margin-bottom: 6px; }}
-            input, textarea {{ width: 100%; padding: 10px 12px; border-radius: 8px; border: 1px solid #374151; background: #0b1020; color: #e5e7eb; }}
-            button {{ padding: 10px 18px; border-radius: 999px; border: none; background: #6366f1; color: white; font-weight: 600; cursor: pointer; }}
+            .nav button {{ background: rgba(255,255,255,0.08); }}
+            .nav button.active {{ background: rgba(99,102,241,0.6); }}
+            .title {{ font-size: 18px; font-weight: 700; letter-spacing: 0.2px; }}
+            .chat {{ flex: 1; min-height: 0; overflow-y: auto; padding: 20px; background: transparent; }}
+            .bubble {{
+                max-width: 72%;
+                padding: 12px 14px;
+                border-radius: 18px;
+                margin-bottom: 10px;
+                white-space: pre-wrap;
+                overflow-wrap: anywhere;
+                word-break: break-word;
+                line-height: 1.45;
+                background: rgba(255,255,255,0.10);
+                border: 1px solid rgba(255,255,255,0.12);
+                backdrop-filter: blur(14px) saturate(180%);
+                box-shadow: inset 0 1px 0 rgba(255,255,255,0.08), 0 10px 30px rgba(0,0,0,0.18);
+            }}
+            .bubble.user {{ margin-left: auto; background: rgba(99,102,241,0.55); color: white; border-bottom-right-radius: 6px; }}
+            .bubble.bot {{ margin-right: auto; background: rgba(124,58,237,0.45); color: white; border-bottom-left-radius: 6px; }}
+            .composer {{
+                padding: 16px 20px;
+                background: rgba(17,24,39,0.55);
+                border-top: 1px solid rgba(255,255,255,0.08);
+                display: flex; flex-direction: column; gap: 12px;
+                position: sticky; bottom: 0;
+                backdrop-filter: blur(18px) saturate(180%);
+            }}
+            .composer-row {{ display: flex; flex-direction: column; gap: 8px; }}
+            .composer-input {{ position: relative; display: flex; align-items: stretch; }}
+            textarea {{
+                flex: 1;
+                min-height: 52px;
+                max-height: 200px;
+                resize: vertical;
+                padding-right: 60px;
+                white-space: pre-wrap;
+                overflow-wrap: anywhere;
+                word-break: break-word;
+            }}
+            label {{ display: block; font-size: 11px; text-transform: uppercase; letter-spacing: 0.08em; color: rgba(229,231,235,0.7); margin-bottom: 6px; }}
+            input, textarea {{
+                width: 100%; padding: 10px 12px; border-radius: 12px;
+                border: 1px solid rgba(255,255,255,0.12);
+                background: rgba(15,23,42,0.55);
+                color: #e5e7eb;
+                backdrop-filter: blur(12px) saturate(180%);
+                box-shadow: inset 0 1px 0 rgba(255,255,255,0.06);
+            }}
+            button {{
+                padding: 10px 18px; border-radius: 16px; border: 1px solid rgba(255,255,255,0.12);
+                background: rgba(99,102,241,0.55);
+                color: white; font-weight: 600; cursor: pointer;
+                backdrop-filter: blur(14px) saturate(180%);
+                box-shadow: inset 0 1px 0 rgba(255,255,255,0.08), 0 10px 24px rgba(0,0,0,0.18);
+                transition: transform 0.08s ease, box-shadow 0.2s ease, background 0.2s ease;
+            }}
+            button:hover {{ background: rgba(99,102,241,0.7); }}
+            button:active {{ transform: translateY(1px); }}
             button:disabled {{ opacity: 0.6; cursor: not-allowed; }}
-            .send {{ height: 44px; min-width: 92px; }}
-            .error {{ color: #f87171; font-weight: 600; padding: 8px 20px; background: #111827; }}
-            .hint {{ color: #9ca3af; font-size: 12px; }}
-            .bubble pre {{ background: rgba(0,0,0,0.2); padding: 10px; border-radius: 8px; overflow-x: auto; }}
+            .send {{
+                position: absolute;
+                right: 6px;
+                bottom: 6px;
+                height: 40px;
+                width: 40px;
+                min-width: 40px;
+                padding: 0;
+                border-radius: 10px;
+                display: flex; align-items: center; justify-content: center;
+            }}
+            .error {{ color: #fca5a5; font-weight: 600; padding: 8px 20px; background: rgba(17,24,39,0.55); backdrop-filter: blur(12px); }}
+            .hint {{ color: rgba(229,231,235,0.7); font-size: 12px; }}
+            .bubble pre {{ background: rgba(0,0,0,0.2); padding: 10px; border-radius: 10px; overflow-x: auto; }}
             .bubble code {{ font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace; }}
             .bubble a {{ color: #e0e7ff; text-decoration: underline; }}
             .bubble blockquote {{ border-left: 3px solid rgba(255,255,255,0.5); margin: 6px 0; padding-left: 10px; color: rgba(255,255,255,0.9); }}
             .bubble ul, .bubble ol {{ padding-left: 20px; margin: 6px 0; }}
             .bubble h1, .bubble h2, .bubble h3 {{ margin: 6px 0; font-weight: 700; }}
             .settings {{ flex: 1; overflow-y: auto; padding: 20px; display: flex; flex-direction: column; gap: 16px; }}
-            .settings-card {{ background: #111827; border: 1px solid #1f2937; border-radius: 12px; padding: 16px; }}
+            .settings-card {{
+                background: rgba(17,24,39,0.55);
+                border: 1px solid rgba(255,255,255,0.12);
+                border-radius: 16px;
+                padding: 16px;
+                backdrop-filter: blur(14px) saturate(180%);
+                box-shadow: inset 0 1px 0 rgba(255,255,255,0.06), 0 12px 28px rgba(0,0,0,0.18);
+            }}
             .tool-list {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 10px; }}
             .tool-item {{ display: flex; align-items: center; gap: 10px; }}
             .status {{ color: #34d399; font-weight: 600; }}
@@ -855,8 +1105,8 @@ fn app_view() -> Element {
                         }
                     }
                     div { class: "composer-row",
-                        div { style: "flex: 1;",
-                            label { "Message" }
+                        label { "Message" }
+                        div { class: "composer-input",
                             textarea {
                                 value: "{input}",
                                 oninput: move |evt| {
@@ -870,12 +1120,12 @@ fn app_view() -> Element {
                                     }
                                 },
                             }
-                        }
-                        button {
-                            class: "send",
-                            disabled: *busy.read(),
-                            onclick: move |_| on_send.call(()),
-                            "Send"
+                            button {
+                                class: "send",
+                                disabled: *busy.read(),
+                                onclick: move |_| on_send.call(()),
+                                "Send"
+                            }
                         }
                     }
                 }

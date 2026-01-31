@@ -8,6 +8,7 @@ use httpmock::MockServer;
 use serde_json::json;
 use tower::ServiceExt;
 use tempfile::NamedTempFile;
+use tokio::sync::broadcast;
 
 use butterfly_bot::client::ButterflyBot;
 use butterfly_bot::config::{AgentConfig, Config, OpenAiConfig};
@@ -48,10 +49,12 @@ async fn daemon_health_and_auth() {
     let reminder_store = ReminderStore::new(reminder_db.path().to_str().unwrap())
         .await
         .unwrap();
+    let (ui_event_tx, _) = broadcast::channel(16);
     let state = AppState {
         agent: Arc::new(agent),
         reminder_store: Arc::new(reminder_store),
         token: "token".to_string(),
+        ui_event_tx,
     };
     let app = build_router(state);
 
@@ -108,10 +111,12 @@ async fn daemon_process_text_and_memory_search() {
     let reminder_store = ReminderStore::new(reminder_db.path().to_str().unwrap())
         .await
         .unwrap();
+    let (ui_event_tx, _) = broadcast::channel(16);
     let state = AppState {
         agent: Arc::new(agent),
         reminder_store: Arc::new(reminder_store),
         token: "token".to_string(),
+        ui_event_tx,
     };
     let app = build_router(state);
 

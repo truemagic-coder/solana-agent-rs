@@ -76,7 +76,8 @@ use crate::providers::memory::InMemoryMemoryProvider;
 use crate::providers::openai::OpenAiProvider;
 use crate::providers::sqlite::{SqliteMemoryProvider, SqliteMemoryProviderConfig};
 use crate::reminders::{default_reminder_db_path, resolve_reminder_db_path, ReminderStore};
-use crate::services::agent::AgentService;
+use crate::services::agent::{AgentService, UiEvent};
+use tokio::sync::broadcast;
 use crate::services::query::QueryService;
 use crate::services::routing::RoutingService;
 use crate::tools::reminders::RemindersTool;
@@ -86,6 +87,13 @@ pub struct ButterflyBotFactory;
 
 impl ButterflyBotFactory {
     pub async fn create_from_config(config: Config) -> Result<QueryService> {
+        Self::create_from_config_with_events(config, None).await
+    }
+
+    pub async fn create_from_config_with_events(
+        config: Config,
+        ui_event_tx: Option<broadcast::Sender<UiEvent>>,
+    ) -> Result<QueryService> {
         let memory_config = config.memory.clone();
         let config_value =
             serde_json::to_value(&config).map_err(|e| ButterflyBotError::Config(e.to_string()))?;
@@ -319,6 +327,7 @@ impl ButterflyBotFactory {
             business_mission,
             output_guardrails,
             brain_manager,
+            ui_event_tx,
         );
         let mut agent_tools: Vec<(String, Vec<String>)> = Vec::new();
         for agent in config.agents {

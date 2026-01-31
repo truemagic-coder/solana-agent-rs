@@ -51,6 +51,7 @@ async fn routing_and_agent_service() {
         Some(mission),
         vec![Arc::new(NoopGuardrail)],
         brain_manager,
+        None,
     );
     service.register_ai_agent(
         "agent1".to_string(),
@@ -87,6 +88,7 @@ async fn routing_and_agent_service() {
         None,
         vec![Arc::new(PiiGuardrail::new(None))],
         pii_brain,
+        None,
     );
     pii_service.register_ai_agent(
         "agent2".to_string(),
@@ -168,7 +170,7 @@ async fn routing_and_agent_service() {
 
     let looping_llm = Arc::new(QueueLlmProvider::new(responses));
     let looping_brain = Arc::new(BrainManager::new(json!({})));
-    let mut looping_service = AgentService::new(looping_llm, None, vec![], looping_brain);
+    let mut looping_service = AgentService::new(looping_llm, None, vec![], looping_brain, None);
     looping_service.register_ai_agent(
         "agent-loop".to_string(),
         "inst".to_string(),
@@ -189,7 +191,7 @@ async fn routing_and_agent_service() {
 
     let llm = Arc::new(QueueLlmProvider::new(vec![]));
     let routing_brain = Arc::new(BrainManager::new(json!({})));
-    let mut service = AgentService::new(llm, None, vec![], routing_brain);
+    let mut service = AgentService::new(llm, None, vec![], routing_brain, None);
     service.register_ai_agent(
         "billing_agent".to_string(),
         "i".to_string(),
@@ -216,6 +218,7 @@ async fn routing_and_agent_service() {
         None,
         vec![],
         empty_brain,
+        None,
     );
     let empty_routing = RoutingService::new(Arc::new(empty_service));
     assert_eq!(
@@ -267,7 +270,7 @@ async fn agent_service_dispatches_brain_events() {
     let brain = Arc::new(brain);
 
     let llm = Arc::new(QueueLlmProvider::new(vec![]));
-    let mut service = AgentService::new(llm, None, vec![], brain);
+    let mut service = AgentService::new(llm, None, vec![], brain, None);
     service.register_ai_agent(
         "agent".to_string(),
         "inst".to_string(),
@@ -301,7 +304,7 @@ async fn agent_service_brain_tick_dispatches() {
     let brain = Arc::new(brain);
 
     let llm = Arc::new(QueueLlmProvider::new(vec![]));
-    let mut service = AgentService::new(llm, None, vec![], brain);
+    let mut service = AgentService::new(llm, None, vec![], brain, None);
     service.register_ai_agent(
         "agent".to_string(),
         "inst".to_string(),

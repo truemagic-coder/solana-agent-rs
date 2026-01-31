@@ -5,6 +5,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use async_stream::try_stream;
 use futures::stream::BoxStream;
 use futures::StreamExt;
+use serde::Serialize;
 use serde_json::json;
 
 use crate::brain::manager::BrainManager;
@@ -14,6 +15,7 @@ use crate::interfaces::brain::{BrainContext, BrainEvent};
 use crate::interfaces::guardrails::OutputGuardrail;
 use crate::interfaces::providers::{LlmProvider, ToolCall};
 use crate::plugins::registry::ToolRegistry;
+use tokio::sync::broadcast;
 use tokio::sync::RwLock;
 
 pub struct AgentService {
@@ -24,6 +26,17 @@ pub struct AgentService {
     output_guardrails: Vec<Arc<dyn OutputGuardrail>>,
     brain_manager: Arc<BrainManager>,
     started_agents: RwLock<HashSet<String>>,
+    ui_event_tx: Option<broadcast::Sender<UiEvent>>,
+}
+
+#[derive(Clone, Debug, Serialize)]
+pub struct UiEvent {
+    pub event_type: String,
+    pub user_id: String,
+    pub tool: String,
+    pub status: String,
+    pub payload: serde_json::Value,
+    pub timestamp: i64,
 }
 
 impl AgentService {
@@ -32,6 +45,7 @@ impl AgentService {
         business_mission: Option<BusinessMission>,
         output_guardrails: Vec<Arc<dyn OutputGuardrail>>,
         brain_manager: Arc<BrainManager>,
+        ui_event_tx: Option<broadcast::Sender<UiEvent>>,
     ) -> Self {
         Self {
             llm_provider,
@@ -41,7 +55,23 @@ impl AgentService {
             output_guardrails,
             brain_manager,
             started_agents: RwLock::new(HashSet::new()),
+            ui_event_tx,
         }
+    }
+
+    fn emit_tool_event(&self, user_id: &str, tool: &str, status: &str, payload: serde_json::Value) {
+        let Some(sender) = &self.ui_event_tx else {
+            return;
+        };
+        let event = UiEvent {
+            event_type: "tool".to_string(),
+            user_id: user_id.to_string(),
+            tool: tool.to_string(),
+            status: status.to_string(),
+            payload,
+            timestamp: now_ts(),
+        };
+        let _ = sender.send(event);
     }
 
     async fn ensure_brain_started(&self, agent_name: &str, user_id: &str) -> Result<()> {
@@ -465,24 +495,37 @@ impl AgentService {
                         }
                     }
                     match tool.execute(args).await {
-                    Ok(result) => {
-                        let _ = self
-                            .tool_registry
-                            .audit_tool_call(&call.name, "success")
-                            .await;
-                        results.push(serde_json::json!({
-                            "tool": call.name,
-                            "status": "success",
-                            "result": result,
-                        }));
-                    }
-                    Err(err) => {
-                        let _ = self
-                            .tool_registry
-                            .audit_tool_call(&call.name, "error")
-                            .await;
-                        return Err(err);
-                    }
+                        Ok(result) => {
+                            let _ = self
+                                .tool_registry
+                                .audit_tool_call(&call.name, "success")
+                                .await;
+                            let result_clone = result.clone();
+                            self.emit_tool_event(
+                                user_id,
+                                &call.name,
+                                "success",
+                                serde_json::json!({ "args": call.arguments.clone(), "result": result_clone }),
+                            );
+                            results.push(serde_json::json!({
+                                "tool": call.name,
+                                "status": "success",
+                                "result": result,
+                            }));
+                        }
+                        Err(err) => {
+                            let _ = self
+                                .tool_registry
+                                .audit_tool_call(&call.name, "error")
+                                .await;
+                            self.emit_tool_event(
+                                user_id,
+                                &call.name,
+                                "error",
+                                serde_json::json!({ "args": call.arguments.clone(), "error": err.to_string() }),
+                            );
+                            return Err(err);
+                        }
                 }
                 },
                 None => {
@@ -490,6 +533,12 @@ impl AgentService {
                         .tool_registry
                         .audit_tool_call(&call.name, "not_found")
                         .await;
+                    self.emit_tool_event(
+                        user_id,
+                        &call.name,
+                        "not_found",
+                        serde_json::json!({ "args": call.arguments.clone(), "message": "Tool not found" }),
+                    );
                     results.push(serde_json::json!({
                         "tool": call.name,
                         "status": "error",
@@ -500,4 +549,11 @@ impl AgentService {
         }
         Ok(results)
     }
+}
+
+fn now_ts() -> i64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs() as i64
 }

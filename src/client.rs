@@ -8,6 +8,8 @@ use crate::error::{ButterflyBotError, Result};
 use crate::factories::agent_factory::ButterflyBotFactory;
 use crate::interfaces::plugins::Tool;
 use crate::services::query::{ProcessOptions, ProcessResult, QueryService, UserInput};
+use crate::services::agent::UiEvent;
+use tokio::sync::broadcast;
 
 pub struct ButterflyBot {
     query_service: QueryService,
@@ -19,9 +21,27 @@ impl ButterflyBot {
         Ok(Self { query_service })
     }
 
+    pub async fn from_config_with_events(
+        config: Config,
+        ui_event_tx: Option<broadcast::Sender<UiEvent>>,
+    ) -> Result<Self> {
+        let query_service =
+            ButterflyBotFactory::create_from_config_with_events(config, ui_event_tx).await?;
+        Ok(Self { query_service })
+    }
+
     pub async fn from_store(db_path: &str) -> Result<Self> {
         let config = Config::from_store(db_path)?.resolve_vault()?;
         let agent = Self::from_config(config).await?;
+        Ok(agent)
+    }
+
+    pub async fn from_store_with_events(
+        db_path: &str,
+        ui_event_tx: Option<broadcast::Sender<UiEvent>>,
+    ) -> Result<Self> {
+        let config = Config::from_store(db_path)?.resolve_vault()?;
+        let agent = Self::from_config_with_events(config, ui_event_tx).await?;
         Ok(agent)
     }
 
