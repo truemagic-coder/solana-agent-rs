@@ -11,6 +11,7 @@ use diesel_migrations::{embed_migrations, EmbeddedMigrations, MigrationHarness};
 use serde::Serialize;
 
 use crate::error::{ButterflyBotError, Result};
+use crate::sqlcipher::{apply_sqlcipher_key, apply_sqlcipher_key_async};
 
 mod schema;
 use schema::reminders;
@@ -55,6 +56,7 @@ struct NewReminder<'a> {
 
 pub struct ReminderStore {
     pool: SqlitePool,
+    sqlite_path: String,
 }
 
 impl ReminderStore {
@@ -68,7 +70,10 @@ impl ReminderStore {
             .build(manager)
             .await
             .map_err(|e| ButterflyBotError::Runtime(e.to_string()))?;
-        Ok(Self { pool })
+        Ok(Self {
+            pool,
+            sqlite_path: sqlite_path.to_string(),
+        })
     }
 
     pub async fn create_reminder(
@@ -240,10 +245,13 @@ impl ReminderStore {
     }
 
     async fn conn(&self) -> Result<SqlitePooledConn<'_>> {
-        self.pool
+        let mut conn = self
+            .pool
             .get()
             .await
-            .map_err(|e| ButterflyBotError::Runtime(e.to_string()))
+            .map_err(|e| ButterflyBotError::Runtime(e.to_string()))?;
+        apply_sqlcipher_key_async(&mut conn, &self.sqlite_path).await?;
+        Ok(conn)
     }
 }
 
@@ -305,6 +313,7 @@ async fn run_migrations(database_url: &str) -> Result<()> {
     tokio::task::spawn_blocking(move || {
         let mut conn = SqliteConnection::establish(&database_url)
             .map_err(|e| ButterflyBotError::Runtime(e.to_string()))?;
+        apply_sqlcipher_key(&mut conn, &database_url)?;
         conn.run_pending_migrations(MIGRATIONS)
             .map_err(|e| ButterflyBotError::Runtime(e.to_string()))?;
         Ok::<_, ButterflyBotError>(())

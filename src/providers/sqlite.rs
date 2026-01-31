@@ -21,6 +21,7 @@ use time::{macros::format_description, OffsetDateTime};
 
 use crate::error::{ButterflyBotError, Result};
 use crate::interfaces::providers::{LlmProvider, MemoryProvider};
+use crate::sqlcipher::{apply_sqlcipher_key, apply_sqlcipher_key_async};
 
 mod schema;
 use schema::{captures, messages};
@@ -246,6 +247,7 @@ impl LanceDbStore {
 pub struct SqliteMemoryProvider {
     pool: SqlitePool,
     lancedb: Option<LanceDbStore>,
+    sqlite_path: String,
     embedder: Option<Arc<dyn LlmProvider>>,
     embedding_model: Option<String>,
     reranker: Option<Arc<dyn LlmProvider>>,
@@ -260,6 +262,7 @@ impl Clone for SqliteMemoryProvider {
         Self {
             pool: self.pool.clone(),
             lancedb: self.lancedb.clone(),
+            sqlite_path: self.sqlite_path.clone(),
             embedder: self.embedder.clone(),
             embedding_model: self.embedding_model.clone(),
             reranker: self.reranker.clone(),
@@ -317,6 +320,7 @@ impl SqliteMemoryProvider {
         Ok(Self {
             pool,
             lancedb,
+            sqlite_path: config.sqlite_path.clone(),
             embedder: config.embedder,
             embedding_model: config.embedding_model,
             reranker: config.reranker,
@@ -330,10 +334,13 @@ impl SqliteMemoryProvider {
     }
 
     async fn conn(&self) -> Result<SqlitePooledConn<'_>> {
-        self.pool
+        let mut conn = self
+            .pool
             .get()
             .await
-            .map_err(|e| ButterflyBotError::Runtime(e.to_string()))
+            .map_err(|e| ButterflyBotError::Runtime(e.to_string()))?;
+        apply_sqlcipher_key_async(&mut conn, &self.sqlite_path).await?;
+        Ok(conn)
     }
 }
 
@@ -360,6 +367,7 @@ async fn run_migrations(database_url: &str) -> Result<()> {
     tokio::task::spawn_blocking(move || {
         let mut conn = SqliteConnection::establish(&database_url)
             .map_err(|e| ButterflyBotError::Runtime(e.to_string()))?;
+        apply_sqlcipher_key(&mut conn, &database_url)?;
         conn.run_pending_migrations(MIGRATIONS)
             .map_err(|e| ButterflyBotError::Runtime(e.to_string()))?;
         Ok::<_, ButterflyBotError>(())

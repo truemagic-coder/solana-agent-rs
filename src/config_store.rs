@@ -8,6 +8,7 @@ use serde_json::Value;
 
 use crate::config::Config;
 use crate::error::{ButterflyBotError, Result};
+use crate::sqlcipher::apply_sqlcipher_key;
 
 #[derive(QueryableByName)]
 struct ConfigRow {
@@ -24,7 +25,10 @@ pub fn ensure_parent_dir(path: &str) -> Result<()> {
 }
 
 fn open_conn(db_path: &str) -> Result<SqliteConnection> {
-    SqliteConnection::establish(db_path).map_err(|e| ButterflyBotError::Runtime(e.to_string()))
+    let mut conn =
+        SqliteConnection::establish(db_path).map_err(|e| ButterflyBotError::Runtime(e.to_string()))?;
+    apply_sqlcipher_key(&mut conn, db_path)?;
+    Ok(conn)
 }
 
 fn ensure_table(conn: &mut SqliteConnection) -> Result<()> {

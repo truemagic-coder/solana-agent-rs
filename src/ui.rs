@@ -16,6 +16,8 @@ use std::env;
 use std::thread;
 use tokio::time::{sleep, timeout, Duration};
 
+use crate::services::daemon_client::DaemonClient;
+
 const AVAILABLE_TOOLS: [&str; 2] = ["search_internet", "reminders"];
 
 #[derive(Clone, Serialize)]
@@ -224,8 +226,6 @@ fn app_view() -> Element {
                 input.set(String::new());
                 scroll_chat_after_render().await;
 
-                let client = reqwest::Client::new();
-                let url = format!("{}/process_text_stream", daemon_url.trim_end_matches('/'));
                 let body = ProcessTextRequest {
                     user_id,
                     text,
@@ -236,131 +236,81 @@ fn app_view() -> Element {
                     },
                 };
 
-                let make_request = |client: &reqwest::Client,
-                                    url: &str,
-                                    token: &str,
-                                    body: &ProcessTextRequest| {
-                    let mut request = client.post(url);
-                    if !token.trim().is_empty() {
-                        request = request.header("authorization", format!("Bearer {token}"));
-                    }
-                    request.json(body)
-                };
-
-                match make_request(&client, &url, &token, &body).send().await {
-                    Ok(response) => {
-                        let mut messages = messages.clone();
-                        let mut error = error.clone();
-                        if response.status().is_success() {
-                            let mut stream = response.bytes_stream();
-                            loop {
-                                let next_chunk =
-                                    match timeout(Duration::from_secs(45), stream.next()).await {
-                                        Ok(value) => value,
-                                        Err(_) => {
-                                            error.set(
-                                                "Stream timed out waiting for response."
-                                                    .to_string(),
-                                            );
-                                            break;
-                                        }
-                                    };
-                                let Some(chunk) = next_chunk else {
-                                    break;
-                                };
-                                match chunk {
-                                    Ok(bytes) => {
-                                        if let Ok(text_chunk) = std::str::from_utf8(&bytes) {
-                                            if !text_chunk.is_empty() {
-                                                let mut list = messages.write();
-                                                if let Some(last) = list
-                                                    .iter_mut()
-                                                    .rev()
-                                                    .find(|msg| msg.id == bot_message_id)
-                                                {
-                                                    last.text.push_str(text_chunk);
-                                                }
-                                            }
-                                        }
-                                        scroll_chat_to_bottom().await;
-                                    }
-                                    Err(err) => {
-                                        error.set(format!("Stream error: {err}"));
-                                        break;
-                                    }
-                                }
-                            }
-                        } else {
-                            let status = response.status();
-                            let text = response
-                                .text()
-                                .await
-                                .unwrap_or_else(|_| "Unable to read error body".to_string());
-                            error.set(format!("Request failed ({status}): {text}"));
+                let mut attempt = 0;
+                loop {
+                    let client = match DaemonClient::new(daemon_url.clone(), token.clone()).await {
+                        Ok(client) => client,
+                        Err(err) => {
+                            error.set(format!("Failed to connect to daemon: {err}"));
+                            break;
                         }
-                    }
-                    Err(_err) => {
-                        start_local_daemon();
-                        sleep(Duration::from_millis(400)).await;
-                        match make_request(&client, &url, &token, &body).send().await {
-                            Ok(response) => {
-                                let mut messages = messages.clone();
-                                let mut error = error.clone();
-                                if response.status().is_success() {
-                                    let mut stream = response.bytes_stream();
-                                    loop {
-                                        let next_chunk =
-                                            match timeout(Duration::from_secs(45), stream.next())
-                                                .await
-                                            {
-                                                Ok(value) => value,
-                                                Err(_) => {
-                                                    error.set(
-                                                        "Stream timed out waiting for response."
-                                                            .to_string(),
-                                                    );
-                                                    break;
-                                                }
-                                            };
-                                        let Some(chunk) = next_chunk else {
-                                            break;
-                                        };
-                                        match chunk {
-                                            Ok(bytes) => {
-                                                if let Ok(text_chunk) = std::str::from_utf8(&bytes)
-                                                {
-                                                    if !text_chunk.is_empty() {
-                                                        let mut list = messages.write();
-                                                        if let Some(last) = list
-                                                            .iter_mut()
-                                                            .rev()
-                                                            .find(|msg| msg.id == bot_message_id)
-                                                        {
-                                                            last.text.push_str(text_chunk);
-                                                        }
-                                                    }
-                                                }
-                                                scroll_chat_to_bottom().await;
-                                            }
-                                            Err(err) => {
-                                                error.set(format!("Stream error: {err}"));
+                    };
+
+                    match client.post_json_stream("process_text_stream", &body).await {
+                        Ok(response) => {
+                            let mut messages = messages.clone();
+                            let mut error = error.clone();
+                            if response.status.is_success() {
+                                let mut stream = response.stream;
+                                loop {
+                                    let next_chunk =
+                                        match timeout(Duration::from_secs(45), stream.next()).await
+                                        {
+                                            Ok(value) => value,
+                                            Err(_) => {
+                                                error.set(
+                                                    "Stream timed out waiting for response."
+                                                        .to_string(),
+                                                );
                                                 break;
                                             }
+                                        };
+                                    let Some(chunk) = next_chunk else {
+                                        break;
+                                    };
+                                    match chunk {
+                                        Ok(bytes) => {
+                                            if let Ok(text_chunk) = std::str::from_utf8(&bytes) {
+                                                if !text_chunk.is_empty() {
+                                                    let mut list = messages.write();
+                                                    if let Some(last) = list
+                                                        .iter_mut()
+                                                        .rev()
+                                                        .find(|msg| msg.id == bot_message_id)
+                                                    {
+                                                        last.text.push_str(text_chunk);
+                                                    }
+                                                }
+                                            }
+                                            scroll_chat_to_bottom().await;
+                                        }
+                                        Err(err) => {
+                                            error.set(format!("Stream error: {err}"));
+                                            break;
                                         }
                                     }
-                                } else {
-                                    let status = response.status();
-                                    let text = response.text().await.unwrap_or_else(|_| {
-                                        "Unable to read error body".to_string()
-                                    });
-                                    error.set(format!("Request failed ({status}): {text}"));
                                 }
+                            } else {
+                                let status = response.status;
+                                let text = response
+                                    .collect_string()
+                                    .await
+                                    .unwrap_or_else(|_| "Unable to read error body".to_string());
+                                error.set(format!("Request failed ({status}): {text}"));
                             }
-                            Err(err) => {
-                                error.set(format!(
-                                    "Request failed: {err}. Daemon unreachable at {daemon_url}."
-                                ));
+                            break;
+                        }
+                        Err(err) => {
+                            if attempt == 0 {
+                                attempt += 1;
+                                start_local_daemon();
+                                sleep(Duration::from_millis(400)).await;
+                                continue;
                             }
+                            error.set(format!(
+                                "Request failed: {err}. Daemon unreachable at {daemon_url}."
+                            ));
+                            break;
                         }
                     }
                 }
@@ -388,32 +338,31 @@ fn app_view() -> Element {
             let mut next_id = next_id;
 
             reminders_listening.set(true);
-            let client = reqwest::Client::new();
             loop {
-                let url = format!(
-                    "{}/reminder_stream?user_id={}",
-                    daemon_url().trim_end_matches('/'),
-                    user_id()
-                );
-                let mut request = client.get(&url);
                 let token_value = token();
-                if !token_value.trim().is_empty() {
-                    request = request.header("authorization", format!("Bearer {token_value}"));
-                }
-
-                let response = match request.send().await {
+                let client = match DaemonClient::new(daemon_url().to_string(), token_value.clone()).await {
+                    Ok(client) => client,
+                    Err(_) => {
+                        sleep(Duration::from_secs(2)).await;
+                        continue;
+                    }
+                };
+                let response = match client
+                    .get_stream("reminder_stream", &[("user_id", user_id())])
+                    .await
+                {
                     Ok(resp) => resp,
                     Err(_) => {
                         sleep(Duration::from_secs(2)).await;
                         continue;
                     }
                 };
-                if !response.status().is_success() {
+                if !response.status.is_success() {
                     sleep(Duration::from_secs(2)).await;
                     continue;
                 }
 
-                let mut stream = response.bytes_stream();
+                let mut stream = response.stream;
                 let mut buffer = String::new();
                 while let Some(chunk) = stream.next().await {
                     let Ok(chunk) = chunk else {
@@ -470,32 +419,31 @@ fn app_view() -> Element {
             let mut next_id = next_id;
 
             ui_events_listening.set(true);
-            let client = reqwest::Client::new();
             loop {
-                let url = format!(
-                    "{}/ui_events?user_id={}",
-                    daemon_url().trim_end_matches('/'),
-                    user_id()
-                );
-                let mut request = client.get(&url);
                 let token_value = token();
-                if !token_value.trim().is_empty() {
-                    request = request.header("authorization", format!("Bearer {token_value}"));
-                }
-
-                let response = match request.send().await {
+                let client = match DaemonClient::new(daemon_url().to_string(), token_value.clone()).await {
+                    Ok(client) => client,
+                    Err(_) => {
+                        sleep(Duration::from_secs(2)).await;
+                        continue;
+                    }
+                };
+                let response = match client
+                    .get_stream("ui_events", &[("user_id", user_id())])
+                    .await
+                {
                     Ok(resp) => resp,
                     Err(_) => {
                         sleep(Duration::from_secs(2)).await;
                         continue;
                     }
                 };
-                if !response.status().is_success() {
+                if !response.status.is_success() {
                     sleep(Duration::from_secs(2)).await;
                     continue;
                 }
 
-                let mut stream = response.bytes_stream();
+                let mut stream = response.stream;
                 let mut buffer = String::new();
                 while let Some(chunk) = stream.next().await {
                     let Ok(chunk) = chunk else {
