@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::env;
 use std::sync::Arc;
 
 use serde_json::Value;
@@ -64,6 +65,10 @@ impl BrainManager {
             .and_then(|value| value.as_array())
             .cloned();
 
+        let allow_default = env::var("BUTTERFLY_BOT_ENABLE_BRAINS")
+            .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
+            .unwrap_or(false);
+
         let mut to_load: Vec<(String, Value)> = Vec::new();
 
         if let Some(entries) = plugin_entries {
@@ -86,12 +91,14 @@ impl BrainManager {
                     _ => {}
                 }
             }
-        } else {
+        } else if allow_default {
             let mut names: Vec<String> = self.plugin_factories.keys().cloned().collect();
             names.sort();
             for name in names {
                 to_load.push((name, Value::Null));
             }
+        } else {
+            return loaded;
         }
 
         for (name, config) in to_load {

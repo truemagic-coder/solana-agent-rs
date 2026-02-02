@@ -15,7 +15,7 @@ use serde_json::{json, Value};
 use std::collections::HashMap;
 use std::env;
 use std::thread;
-use tokio::time::{sleep, timeout, Duration};
+use tokio::time::{sleep, Duration};
 use time::{format_description::parse, OffsetDateTime};
 
 use crate::services::daemon_client::DaemonClient;
@@ -190,6 +190,7 @@ fn app_view() -> Element {
     let ui_events_listening = use_signal(|| false);
     let chat_search = use_signal(String::new);
     let active_chat_id = use_signal(|| "bot".to_string());
+    let username_lookup_inflight = use_signal(|| false);
     let chats = use_signal(|| {
         vec![
             ChatSummary {
@@ -223,9 +224,11 @@ fn app_view() -> Element {
     let trust_error = use_signal(String::new);
     let contacts_loaded = use_signal(|| false);
     let contacts_error = use_signal(String::new);
+    let contacts_lookup_inflight = use_signal(|| false);
     let contact_label = use_signal(String::new);
     let contact_onion = use_signal(String::new);
     let p2p_info_loaded = use_signal(|| false);
+    let p2p_info_inflight = use_signal(|| false);
     let p2p_peer_id = use_signal(String::new);
     let p2p_listen_addrs = use_signal(String::new);
     let p2p_error = use_signal(String::new);
@@ -240,6 +243,8 @@ fn app_view() -> Element {
     let e2e_plaintext = use_signal(String::new);
     let e2e_ciphertext = use_signal(String::new);
     let e2e_error = use_signal(String::new);
+    let daemon_ready = use_signal(|| false);
+    let daemon_probe_inflight = use_signal(|| false);
 
     let tools_loaded = use_signal(|| false);
     let tool_toggles = use_signal(Vec::<ToolToggle>::new);
@@ -532,51 +537,33 @@ fn app_view() -> Element {
                         }
                     };
 
-                    match client.post_json_stream("process_text_stream", &body).await {
+                    match client.post_json_stream("process_text", &body).await {
                         Ok(response) => {
                             let mut messages_by_chat = messages_by_chat.clone();
                             let mut error = error.clone();
                             if response.status.is_success() {
-                                let mut stream = response.stream;
-                                loop {
-                                    let next_chunk =
-                                        match timeout(Duration::from_secs(45), stream.next()).await
-                                        {
-                                            Ok(value) => value,
-                                            Err(_) => {
-                                                error.set(
-                                                    "Stream timed out waiting for response."
-                                                        .to_string(),
-                                                );
-                                                break;
+                                let text = response
+                                    .collect_string()
+                                    .await
+                                    .unwrap_or_default();
+                                if let Ok(value) = serde_json::from_str::<Value>(&text) {
+                                    if let Some(reply) = value.get("text").and_then(|v| v.as_str()) {
+                                        let mut map = messages_by_chat.write();
+                                        if let Some(list) = map.get_mut(&chat_id) {
+                                            if let Some(last) = list
+                                                .iter_mut()
+                                                .rev()
+                                                .find(|msg| msg.id == bot_message_id)
+                                            {
+                                                last.text = reply.to_string();
                                             }
-                                        };
-                                    let Some(chunk) = next_chunk else {
-                                        break;
-                                    };
-                                    match chunk {
-                                        Ok(bytes) => {
-                                            if let Ok(text_chunk) = std::str::from_utf8(&bytes) {
-                                                if !text_chunk.is_empty() {
-                                                    let mut map = messages_by_chat.write();
-                                                    if let Some(list) = map.get_mut(&chat_id) {
-                                                        if let Some(last) = list
-                                                            .iter_mut()
-                                                            .rev()
-                                                            .find(|msg| msg.id == bot_message_id)
-                                                        {
-                                                            last.text.push_str(text_chunk);
-                                                        }
-                                                    }
-                                                }
-                                            }
-                                            scroll_chat_to_bottom().await;
                                         }
-                                        Err(err) => {
-                                            error.set(format!("Stream error: {err}"));
-                                            break;
-                                        }
+                                        scroll_chat_to_bottom().await;
+                                    } else {
+                                        error.set("Invalid response payload.".to_string());
                                     }
+                                } else {
+                                    error.set("Invalid response payload.".to_string());
                                 }
                             } else {
                                 let status = response.status;
@@ -946,9 +933,42 @@ fn app_view() -> Element {
         });
     }
 
-    if !*contacts_loaded.read() {
+    if !*daemon_ready.read() && !*daemon_probe_inflight.read() {
+        let daemon_ready = daemon_ready.clone();
+        let daemon_probe_inflight = daemon_probe_inflight.clone();
+        let daemon_url = daemon_url.clone();
+        let token = token.clone();
+
+        spawn(async move {
+            let mut daemon_ready = daemon_ready;
+            let mut daemon_probe_inflight = daemon_probe_inflight;
+            daemon_probe_inflight.set(true);
+            for attempt in 0..8 {
+                let client = match DaemonClient::new(daemon_url().to_string(), token().to_string()).await {
+                    Ok(client) => client,
+                    Err(_) => {
+                        sleep(Duration::from_millis(400 * (attempt + 1) as u64)).await;
+                        continue;
+                    }
+                };
+                match client.get_stream("health", &[]).await {
+                    Ok(resp) if resp.status.is_success() => {
+                        daemon_ready.set(true);
+                        break;
+                    }
+                    _ => {
+                        sleep(Duration::from_millis(400 * (attempt + 1) as u64)).await;
+                    }
+                }
+            }
+            daemon_probe_inflight.set(false);
+        });
+    }
+
+    if *daemon_ready.read() && !*contacts_loaded.read() && !*contacts_lookup_inflight.read() {
         let contacts_loaded = contacts_loaded.clone();
         let contacts_error = contacts_error.clone();
+        let contacts_lookup_inflight = contacts_lookup_inflight.clone();
         let chats = chats.clone();
         let active_chat_id = active_chat_id.clone();
         let daemon_url = daemon_url.clone();
@@ -958,104 +978,114 @@ fn app_view() -> Element {
         spawn(async move {
             let mut contacts_loaded = contacts_loaded;
             let mut contacts_error = contacts_error;
+            let mut contacts_lookup_inflight = contacts_lookup_inflight;
             let mut chats = chats;
             let mut active_chat_id = active_chat_id;
 
-            contacts_loaded.set(true);
-            let client = match DaemonClient::new(daemon_url().to_string(), token().to_string()).await {
-                Ok(client) => client,
-                Err(err) => {
-                    contacts_error.set(format!("{err}"));
-                    return;
-                }
-            };
-            let response = client
-                .get_stream("contacts", &[("user_id", user_id())])
-                .await;
-            match response {
-                Ok(resp) if resp.status.is_success() => {
-                    if let Ok(text) = resp.collect_string().await {
-                        if let Ok(value) = serde_json::from_str::<Value>(&text) {
-                            let mut list = chats.write();
-                            let existing_bot = list.iter().find(|chat| chat.id == "bot").cloned();
-                            let bot_chat = existing_bot.unwrap_or(ChatSummary {
-                                id: "bot".to_string(),
-                                title: "Butterfly Bot".to_string(),
-                                status: "online".to_string(),
-                                last_message: "Ready to help.".to_string(),
-                                last_time: now_timestamp(),
-                                unread_count: 0,
-                                peer_id: "bot".to_string(),
-                                onion_address: "".to_string(),
-                                trust_state: "verified".to_string(),
-                                public_key: None,
-                            });
-                            let mut next_list = vec![bot_chat];
-                            if let Some(items) = value.get("contacts").and_then(|v| v.as_array()) {
-                                for item in items {
-                                    let peer_id = item.get("peer_id").and_then(|v| v.as_str()).unwrap_or("peer");
-                                    let label = item.get("label").and_then(|v| v.as_str()).unwrap_or(peer_id);
-                                    let onion = item
-                                        .get("onion_address")
-                                        .and_then(|v| v.as_str())
-                                        .unwrap_or_default();
-                                    let trust = item
-                                        .get("trust_state")
-                                        .and_then(|v| v.as_str())
-                                        .unwrap_or("unverified");
-                                    let public_key = item
-                                        .get("public_key")
-                                        .and_then(|v| v.as_str())
-                                        .map(|value| value.to_string());
-                                    let status = if onion.is_empty() {
-                                        format!("trust: {trust}")
-                                    } else {
-                                        format!("trust: {trust} • {onion}")
-                                    };
-                                    let existing = list.iter().find(|chat| chat.id == peer_id).cloned();
-                                    let mut chat = existing.unwrap_or(ChatSummary {
-                                        id: peer_id.to_string(),
-                                        title: label.to_string(),
-                                        status: status.clone(),
-                                        last_message: "No messages yet".to_string(),
-                                        last_time: "".to_string(),
-                                        unread_count: 0,
-                                        peer_id: peer_id.to_string(),
-                                        onion_address: onion.to_string(),
-                                        trust_state: trust.to_string(),
-                                        public_key: public_key.clone(),
-                                    });
-                                    chat.title = label.to_string();
-                                    chat.status = status;
-                                    chat.onion_address = onion.to_string();
-                                    chat.peer_id = peer_id.to_string();
-                                    chat.trust_state = trust.to_string();
-                                    chat.public_key = public_key.clone();
-                                    next_list.push(chat);
+            contacts_lookup_inflight.set(true);
+            for attempt in 0..5 {
+                let client = match DaemonClient::new(daemon_url().to_string(), token().to_string()).await {
+                    Ok(client) => client,
+                    Err(err) => {
+                        contacts_error.set(format!("{err}"));
+                        sleep(Duration::from_millis(400 * (attempt + 1) as u64)).await;
+                        continue;
+                    }
+                };
+                let response = client
+                    .get_stream("contacts", &[("user_id", user_id())])
+                    .await;
+                match response {
+                    Ok(resp) if resp.status.is_success() => {
+                        if let Ok(text) = resp.collect_string().await {
+                            if let Ok(value) = serde_json::from_str::<Value>(&text) {
+                                let mut list = chats.write();
+                                let existing_bot = list.iter().find(|chat| chat.id == "bot").cloned();
+                                let bot_chat = existing_bot.unwrap_or(ChatSummary {
+                                    id: "bot".to_string(),
+                                    title: "Butterfly Bot".to_string(),
+                                    status: "online".to_string(),
+                                    last_message: "Ready to help.".to_string(),
+                                    last_time: now_timestamp(),
+                                    unread_count: 0,
+                                    peer_id: "bot".to_string(),
+                                    onion_address: "".to_string(),
+                                    trust_state: "verified".to_string(),
+                                    public_key: None,
+                                });
+                                let mut next_list = vec![bot_chat];
+                                if let Some(items) = value.get("contacts").and_then(|v| v.as_array()) {
+                                    for item in items {
+                                        let peer_id = item.get("peer_id").and_then(|v| v.as_str()).unwrap_or("peer");
+                                        let label = item.get("label").and_then(|v| v.as_str()).unwrap_or(peer_id);
+                                        let onion = item
+                                            .get("onion_address")
+                                            .and_then(|v| v.as_str())
+                                            .unwrap_or_default();
+                                        let trust = item
+                                            .get("trust_state")
+                                            .and_then(|v| v.as_str())
+                                            .unwrap_or("unverified");
+                                        let public_key = item
+                                            .get("public_key")
+                                            .and_then(|v| v.as_str())
+                                            .map(|value| value.to_string());
+                                        let status = if onion.is_empty() {
+                                            format!("trust: {trust}")
+                                        } else {
+                                            format!("trust: {trust} • {onion}")
+                                        };
+                                        let existing = list.iter().find(|chat| chat.id == peer_id).cloned();
+                                        let mut chat = existing.unwrap_or(ChatSummary {
+                                            id: peer_id.to_string(),
+                                            title: label.to_string(),
+                                            status: status.clone(),
+                                            last_message: "No messages yet".to_string(),
+                                            last_time: "".to_string(),
+                                            unread_count: 0,
+                                            peer_id: peer_id.to_string(),
+                                            onion_address: onion.to_string(),
+                                            trust_state: trust.to_string(),
+                                            public_key: public_key.clone(),
+                                        });
+                                        chat.title = label.to_string();
+                                        chat.status = status;
+                                        chat.onion_address = onion.to_string();
+                                        chat.peer_id = peer_id.to_string();
+                                        chat.trust_state = trust.to_string();
+                                        chat.public_key = public_key.clone();
+                                        next_list.push(chat);
+                                    }
                                 }
+                                let active = active_chat_id();
+                                if !next_list.iter().any(|chat| chat.id == active) {
+                                    active_chat_id.set("bot".to_string());
+                                }
+                                *list = next_list;
+                                contacts_loaded.set(true);
+                                break;
                             }
-                            let active = active_chat_id();
-                            if !next_list.iter().any(|chat| chat.id == active) {
-                                active_chat_id.set("bot".to_string());
-                            }
-                            *list = next_list;
                         }
                     }
+                    Ok(resp) => {
+                        let text = resp.collect_string().await.unwrap_or_default();
+                        contacts_error.set(text);
+                    }
+                    Err(err) => contacts_error.set(format!("{err}")),
                 }
-                Ok(resp) => {
-                    let text = resp.collect_string().await.unwrap_or_default();
-                    contacts_error.set(text);
-                }
-                Err(err) => contacts_error.set(format!("{err}")),
+
+                sleep(Duration::from_millis(400 * (attempt + 1) as u64)).await;
             }
+            contacts_lookup_inflight.set(false);
         });
     }
 
-    if !*p2p_info_loaded.read() {
+    if *daemon_ready.read() && !*p2p_info_loaded.read() && !*p2p_info_inflight.read() {
         let p2p_info_loaded = p2p_info_loaded.clone();
         let p2p_peer_id = p2p_peer_id.clone();
         let p2p_listen_addrs = p2p_listen_addrs.clone();
         let p2p_error = p2p_error.clone();
+        let p2p_info_inflight = p2p_info_inflight.clone();
         let daemon_url = daemon_url.clone();
         let token = token.clone();
 
@@ -1064,44 +1094,56 @@ fn app_view() -> Element {
             let mut p2p_peer_id = p2p_peer_id;
             let mut p2p_listen_addrs = p2p_listen_addrs;
             let mut p2p_error = p2p_error;
+            let mut p2p_info_inflight = p2p_info_inflight;
 
-            p2p_info_loaded.set(true);
-            let client = match DaemonClient::new(daemon_url().to_string(), token().to_string()).await {
-                Ok(client) => client,
-                Err(err) => {
-                    p2p_error.set(format!("{err}"));
-                    return;
-                }
-            };
-            let response = client.get_stream("p2p/info", &[]).await;
-            match response {
-                Ok(resp) if resp.status.is_success() => {
-                    if let Ok(text) = resp.collect_string().await {
-                        if let Ok(value) = serde_json::from_str::<Value>(&text) {
-                            if let Some(peer) = value.get("peer_id").and_then(|v| v.as_str()) {
-                                p2p_peer_id.set(peer.to_string());
-                            }
-                            if let Some(addrs) = value.get("listen_addrs").and_then(|v| v.as_array()) {
-                                let list = addrs
-                                    .iter()
-                                    .filter_map(|v| v.as_str().map(|s| s.to_string()))
-                                    .collect::<Vec<_>>()
-                                    .join("\n");
-                                p2p_listen_addrs.set(list);
+            p2p_info_inflight.set(true);
+            for attempt in 0..5 {
+                let client = match DaemonClient::new(daemon_url().to_string(), token().to_string()).await {
+                    Ok(client) => client,
+                    Err(err) => {
+                        p2p_error.set(format!("{err}"));
+                        sleep(Duration::from_millis(400 * (attempt + 1) as u64)).await;
+                        continue;
+                    }
+                };
+                let response = client.get_stream("p2p/info", &[]).await;
+                match response {
+                    Ok(resp) if resp.status.is_success() => {
+                        if let Ok(text) = resp.collect_string().await {
+                            if let Ok(value) = serde_json::from_str::<Value>(&text) {
+                                if let Some(peer) = value.get("peer_id").and_then(|v| v.as_str()) {
+                                    p2p_peer_id.set(peer.to_string());
+                                }
+                                if let Some(addrs) = value.get("listen_addrs").and_then(|v| v.as_array()) {
+                                    let list = addrs
+                                        .iter()
+                                        .filter_map(|v| v.as_str().map(|s| s.to_string()))
+                                        .collect::<Vec<_>>()
+                                        .join("\n");
+                                    p2p_listen_addrs.set(list);
+                                }
+                                p2p_info_loaded.set(true);
+                                break;
                             }
                         }
                     }
+                    Ok(resp) => {
+                        let text = resp.collect_string().await.unwrap_or_default();
+                        p2p_error.set(text);
+                    }
+                    Err(err) => p2p_error.set(format!("{err}")),
                 }
-                Ok(resp) => {
-                    let text = resp.collect_string().await.unwrap_or_default();
-                    p2p_error.set(text);
-                }
-                Err(err) => p2p_error.set(format!("{err}")),
+
+                sleep(Duration::from_millis(400 * (attempt + 1) as u64)).await;
             }
+            p2p_info_inflight.set(false);
         });
     }
 
-    if local_public_key().is_empty() || !*username_ready.read() {
+    if *daemon_ready.read()
+        && (local_public_key().is_empty() || !*username_ready.read())
+        && !*username_lookup_inflight.read()
+    {
         let mut local_public_key = local_public_key.clone();
         let mut username_ready = username_ready.clone();
         let mut username_claim = username_claim.clone();
@@ -1109,55 +1151,65 @@ fn app_view() -> Element {
         let token = token.clone();
         let user_id = user_id.clone();
         let mut username_lookup_error = username_lookup_error.clone();
+        let mut username_lookup_inflight = username_lookup_inflight.clone();
 
         spawn(async move {
+            username_lookup_inflight.set(true);
             let client = match DaemonClient::new(daemon_url().to_string(), token().to_string()).await {
                 Ok(client) => client,
                 Err(err) => {
                     username_lookup_error.set(format!("{err}"));
+                    username_lookup_inflight.set(false);
                     return;
                 }
             };
-            if local_public_key().is_empty() {
-                let response = client
-                    .get_stream("e2e/identity", &[("user_id", user_id())])
-                    .await;
-                if let Ok(resp) = response {
-                    if resp.status.is_success() {
-                        if let Ok(text) = resp.collect_string().await {
-                            if let Ok(value) = serde_json::from_str::<Value>(&text) {
-                                if let Some(key) = value.get("public_key").and_then(|v| v.as_str()) {
-                                    local_public_key.set(key.to_string());
+            for attempt in 0..5 {
+                if local_public_key().is_empty() {
+                    let response = client
+                        .get_stream("e2e/identity", &[("user_id", user_id())])
+                        .await;
+                    if let Ok(resp) = response {
+                        if resp.status.is_success() {
+                            if let Ok(text) = resp.collect_string().await {
+                                if let Ok(value) = serde_json::from_str::<Value>(&text) {
+                                    if let Some(key) = value.get("public_key").and_then(|v| v.as_str()) {
+                                        local_public_key.set(key.to_string());
+                                    }
                                 }
                             }
                         }
                     }
                 }
-            }
-            let response = client
-                .get_stream("username/me", &[("user_id", user_id())])
-                .await;
-            match response {
-                Ok(resp) if resp.status.is_success() => {
-                    if let Ok(text) = resp.collect_string().await {
-                        if let Ok(value) = serde_json::from_str::<Value>(&text) {
-                            if let Some(name) = value.get("username").and_then(|v| v.as_str()) {
-                                username_claim.set(name.to_string());
-                                username_ready.set(true);
+                let response = client
+                    .get_stream("username/me", &[("user_id", user_id())])
+                    .await;
+                match response {
+                    Ok(resp) if resp.status.is_success() => {
+                        if let Ok(text) = resp.collect_string().await {
+                            if let Ok(value) = serde_json::from_str::<Value>(&text) {
+                                if let Some(name) = value.get("username").and_then(|v| v.as_str()) {
+                                    username_claim.set(name.to_string());
+                                    username_ready.set(true);
+                                    break;
+                                }
                             }
                         }
                     }
-                }
-                Ok(resp) => {
-                    if resp.status == reqwest::StatusCode::NOT_FOUND {
-                        username_ready.set(false);
-                    } else {
-                        let text = resp.collect_string().await.unwrap_or_default();
-                        username_lookup_error.set(text);
+                    Ok(resp) => {
+                        if resp.status == reqwest::StatusCode::NOT_FOUND {
+                            username_ready.set(false);
+                            break;
+                        } else {
+                            let text = resp.collect_string().await.unwrap_or_default();
+                            username_lookup_error.set(text);
+                        }
                     }
+                    Err(err) => username_lookup_error.set(format!("{err}")),
                 }
-                Err(err) => username_lookup_error.set(format!("{err}")),
+
+                sleep(Duration::from_millis(400 * (attempt + 1) as u64)).await;
             }
+            username_lookup_inflight.set(false);
         });
     }
 
@@ -1783,6 +1835,9 @@ fn app_view() -> Element {
                     div { class: "gate-card",
                         div { class: "gate-title", "Claim your username" }
                         div { class: "hint", "Pick a unique name (3-32 chars, a-z, 0-9, underscore)." }
+                        if !*daemon_ready.read() {
+                            div { class: "hint", "Daemon starting…" }
+                        }
                         input {
                             value: "{username_claim}",
                             placeholder: "yourname",
@@ -1792,6 +1847,7 @@ fn app_view() -> Element {
                             },
                         }
                         button {
+                            disabled: !*daemon_ready.read(),
                             onclick: move |_| {
                                 let daemon_url = daemon_url.clone();
                                 let token = token.clone();

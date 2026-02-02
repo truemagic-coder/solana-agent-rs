@@ -1,4 +1,7 @@
 use std::env;
+use std::ffi::CString;
+use std::os::raw::c_char;
+use std::sync::Once;
 
 use base64::engine::general_purpose::STANDARD as BASE64;
 use base64::Engine;
@@ -12,6 +15,38 @@ use rand_core::{OsRng, RngCore};
 use crate::error::{ButterflyBotError, Result};
 
 const DB_KEY_SERVICE: &str = "butterfly-bot.db";
+
+pub fn configure_sqlcipher_logging() {
+    static INIT: Once = Once::new();
+    INIT.call_once(|| unsafe {
+        let mut db: *mut libsqlite3_sys::sqlite3 = std::ptr::null_mut();
+        let name = CString::new(":memory:").unwrap();
+        let rc = libsqlite3_sys::sqlite3_open(name.as_ptr(), &mut db);
+        if rc != libsqlite3_sys::SQLITE_OK {
+            if !db.is_null() {
+                libsqlite3_sys::sqlite3_close(db);
+            }
+            return;
+        }
+
+        let pragma = CString::new(
+            "PRAGMA cipher_log_level = ERROR; PRAGMA cipher_log_source = NONE;",
+        )
+        .unwrap();
+        let mut err: *mut c_char = std::ptr::null_mut();
+        let _ = libsqlite3_sys::sqlite3_exec(
+            db,
+            pragma.as_ptr(),
+            None,
+            std::ptr::null_mut(),
+            &mut err,
+        );
+        if !err.is_null() {
+            libsqlite3_sys::sqlite3_free(err as *mut _);
+        }
+        libsqlite3_sys::sqlite3_close(db);
+    });
+}
 
 pub fn get_or_create_db_key(db_path: &str) -> Result<String> {
     if let Ok(value) = env::var("BUTTERFLY_BOT_DB_KEY") {

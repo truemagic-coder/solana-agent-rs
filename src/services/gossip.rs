@@ -2,6 +2,8 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
 
+use base64::engine::general_purpose::STANDARD as BASE64;
+use base64::Engine;
 use futures::StreamExt;
 use libp2p::gossipsub::{
     self, AllowAllSubscriptionFilter, IdentTopic, IdentityTransform, MessageAuthenticity,
@@ -10,8 +12,8 @@ use libp2p::gossipsub::{
 use libp2p::kad::{self, store::MemoryStore, GetRecordOk, PutRecordOk, Quorum, Record, RecordKey};
 use libp2p::swarm::{NetworkBehaviour, SwarmEvent};
 use libp2p::{identity, noise, tcp, yamux, Multiaddr, PeerId, Swarm, Transport};
-use base64::engine::general_purpose::STANDARD as BASE64;
-use base64::Engine;
+use std::fs;
+use std::path::Path;
 use serde::{Deserialize, Serialize};
 use tokio::sync::{broadcast, mpsc, oneshot, RwLock};
 
@@ -120,7 +122,9 @@ impl GossipHandle {
         bootstrap: Vec<Multiaddr>,
         topic_name: &str,
     ) -> BotResult<Self> {
-        let local_key = identity::Keypair::generate_ed25519();
+        let key_path = std::env::var("BUTTERFLY_BOT_GOSSIP_KEY_PATH")
+            .unwrap_or_else(|_| "./data/gossip.key".to_string());
+        let local_key = load_or_create_keypair(&key_path)?;
         let peer_id = PeerId::from(local_key.public());
 
         let transport = tcp::tokio::Transport::new(tcp::Config::default().nodelay(true))
@@ -358,4 +362,28 @@ impl GossipHandle {
         let list = self.listen_addrs.read().await;
         list.clone()
     }
+}
+
+fn load_or_create_keypair(path: &str) -> BotResult<identity::Keypair> {
+    if let Some(parent) = Path::new(path).parent() {
+        let _ = fs::create_dir_all(parent);
+    }
+
+    if let Ok(encoded) = fs::read_to_string(path) {
+        if let Ok(raw) = BASE64.decode(encoded.trim()) {
+            if let Ok(keypair) = identity::Keypair::from_protobuf_encoding(&raw) {
+                return Ok(keypair);
+            }
+        }
+    }
+
+    let keypair = identity::Keypair::generate_ed25519();
+    let encoded = keypair
+        .to_protobuf_encoding()
+        .map(|raw| BASE64.encode(raw))
+        .unwrap_or_default();
+    if !encoded.is_empty() {
+        let _ = fs::write(path, encoded);
+    }
+    Ok(keypair)
 }

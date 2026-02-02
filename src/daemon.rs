@@ -168,7 +168,8 @@ fn is_valid_username(value: &str) -> bool {
 }
 
 use crate::client::ButterflyBot;
-use crate::config::{AgentConfig, Config, MemoryConfig, OpenAiConfig};
+use crate::candle_vllm::DEFAULT_CANDLE_MODEL_ID;
+use crate::config::{AgentConfig, CandleVllmConfig, Config, MemoryConfig, OpenAiConfig};
 use crate::config_store;
 use crate::e2e::identity_store::KeyringIdentityStore;
 use crate::e2e::manager::E2eManager;
@@ -184,11 +185,11 @@ use crate::scheduler::Scheduler;
 use crate::services::agent::UiEvent;
 use crate::services::gossip::{GossipHandle, GossipMessage};
 use crate::services::query::{OutputFormat, ProcessOptions, ProcessResult, UserInput};
-use tokio::sync::broadcast;
+use tokio::sync::{broadcast, RwLock};
 
 #[derive(Clone)]
 pub struct AppState {
-    pub agent: Arc<ButterflyBot>,
+    pub agent: Arc<RwLock<Option<Arc<ButterflyBot>>>>,
     pub reminder_store: Arc<ReminderStore>,
     pub token: String,
     pub ui_event_tx: broadcast::Sender<UiEvent>,
@@ -198,7 +199,7 @@ pub struct AppState {
 }
 
 struct BrainTickJob {
-    agent: Arc<ButterflyBot>,
+    agent: Arc<RwLock<Option<Arc<ButterflyBot>>>>,
     interval: Duration,
 }
 
@@ -213,7 +214,9 @@ impl ScheduledJob for BrainTickJob {
     }
 
     async fn run(&self) -> Result<()> {
-        self.agent.brain_tick().await;
+        if let Some(agent) = self.agent.read().await.clone() {
+            agent.brain_tick().await;
+        }
         Ok(())
     }
 }
@@ -260,6 +263,21 @@ struct MemorySearchResponse {
 #[derive(Serialize)]
 struct ErrorResponse {
     error: String,
+}
+
+async fn require_agent(
+    state: &AppState,
+) -> std::result::Result<Arc<ButterflyBot>, (StatusCode, Json<ErrorResponse>)> {
+    if let Some(agent) = state.agent.read().await.clone() {
+        Ok(agent)
+    } else {
+        Err((
+            StatusCode::SERVICE_UNAVAILABLE,
+            Json(ErrorResponse {
+                error: "Agent warming up".to_string(),
+            }),
+        ))
+    }
 }
 
 #[derive(Deserialize)]
@@ -438,8 +456,11 @@ async fn process_text(
         router: None,
     };
 
-    let response = state
-        .agent
+    let agent = match require_agent(&state).await {
+        Ok(agent) => agent,
+        Err(err) => return err.into_response(),
+    };
+    let response = agent
         .process(&payload.user_id, UserInput::Text(payload.text), options)
         .await;
 
@@ -473,12 +494,15 @@ async fn process_text_stream(
         return err.into_response();
     }
 
-    let AppState { agent, .. } = state;
     let ProcessTextRequest {
         user_id,
         text,
         prompt,
     } = payload;
+    let agent = match require_agent(&state).await {
+        Ok(agent) => agent,
+        Err(err) => return err.into_response(),
+    };
 
     let body = Body::from_stream(async_stream::stream! {
         let mut stream = agent.process_text_stream(&user_id, &text, prompt.as_deref());
@@ -515,8 +539,11 @@ async fn memory_search(
     }
 
     let limit = payload.limit.unwrap_or(8);
-    let response = state
-        .agent
+    let agent = match require_agent(&state).await {
+        Ok(agent) => agent,
+        Err(err) => return err.into_response(),
+    };
+    let response = agent
         .search_memory(&payload.user_id, &payload.query, limit)
         .await;
 
@@ -1320,15 +1347,32 @@ pub async fn run(host: &str, port: u16, db_path: &str, token: &str) -> Result<()
 }
 
 fn default_config(db_path: &str) -> Config {
-    let base_url = "http://localhost:11434/v1".to_string();
-    let model = "glm-4.7-flash:latest".to_string();
+    let candle = CandleVllmConfig {
+        enabled: Some(true),
+        model_id: Some(DEFAULT_CANDLE_MODEL_ID.to_string()),
+        weight_path: None,
+        gguf_file: None,
+        hf_token: None,
+        device_ids: None,
+        kvcache_mem_gpu: None,
+        kvcache_mem_cpu: None,
+        temperature: None,
+        top_p: None,
+        dtype: None,
+        isq: None,
+        binary_path: None,
+        host: None,
+        port: None,
+        extra_args: None,
+    };
+    let model = DEFAULT_CANDLE_MODEL_ID.to_string();
     let memory = Some(MemoryConfig {
         enabled: Some(true),
         sqlite_path: Some(db_path.to_string()),
-        lancedb_path: Some("./data/lancedb".to_string()),
-        summary_model: Some(model.clone()),
-        embedding_model: Some("embeddinggemma:latest".to_string()),
-        rerank_model: Some("qllama/bge-reranker-v2-m3".to_string()),
+        lancedb_path: None,
+        summary_model: None,
+        embedding_model: None,
+        rerank_model: None,
         summary_threshold: None,
         retention_days: None,
     });
@@ -1337,8 +1381,9 @@ fn default_config(db_path: &str) -> Config {
         openai: Some(OpenAiConfig {
             api_key: None,
             model: Some(model),
-            base_url: Some(base_url),
+            base_url: None,
         }),
+        candle_vllm: Some(candle),
         agents: vec![AgentConfig {
             name: "default_agent".to_string(),
             description: Some("Butterfly, an expert conversationalist and assistant.".to_string()),
@@ -1392,7 +1437,49 @@ where
         config_store::save_config(db_path, &default_config)?;
     }
 
-    let config = Config::from_store(db_path).ok();
+    let mut config = Config::from_store(db_path).ok();
+    if let Some(cfg) = config.as_mut() {
+        let mut changed = false;
+        if cfg.candle_vllm.is_none()
+            && cfg
+                .openai
+                .as_ref()
+                .and_then(|openai| openai.base_url.as_deref())
+                .map(|url| {
+                    url.starts_with("http://localhost:11434")
+                        || url.starts_with("http://127.0.0.1:11434")
+                })
+                .unwrap_or(false)
+        {
+            cfg.candle_vllm = Some(CandleVllmConfig {
+                enabled: Some(true),
+                model_id: Some(DEFAULT_CANDLE_MODEL_ID.to_string()),
+                weight_path: None,
+                gguf_file: None,
+                hf_token: None,
+                device_ids: None,
+                kvcache_mem_gpu: None,
+                kvcache_mem_cpu: None,
+                temperature: None,
+                top_p: None,
+                dtype: None,
+                isq: None,
+                binary_path: None,
+                host: None,
+                port: None,
+                extra_args: None,
+            });
+            if let Some(openai) = cfg.openai.as_mut() {
+                openai.base_url = None;
+                openai.model = Some(DEFAULT_CANDLE_MODEL_ID.to_string());
+            }
+            changed = true;
+        }
+        if changed {
+            config_store::save_config(db_path, cfg)?;
+        }
+    }
+
     let tick_seconds = config
         .as_ref()
         .and_then(|cfg| cfg.brains.as_ref())
@@ -1402,8 +1489,7 @@ where
         .unwrap_or(60);
 
     let (ui_event_tx, _) = broadcast::channel(256);
-    let agent =
-        Arc::new(ButterflyBot::from_store_with_events(db_path, Some(ui_event_tx.clone())).await?);
+    let agent = Arc::new(RwLock::new(None));
     let reminder_store = Arc::new(ReminderStore::new(db_path).await?);
     let identity_store = Arc::new(KeyringIdentityStore::new("butterfly-bot.identity"));
     let e2e = Arc::new(E2eManager::new(identity_store));
@@ -1437,6 +1523,15 @@ where
         db_path: db_path.to_string(),
         gossip: gossip.clone(),
     };
+    let agent_state = state.agent.clone();
+    let db_path = db_path.to_string();
+    let ui_event_tx = state.ui_event_tx.clone();
+    tokio::spawn(async move {
+        if let Ok(agent) = ButterflyBot::from_store_with_events(&db_path, Some(ui_event_tx)).await {
+            let mut guard = agent_state.write().await;
+            *guard = Some(Arc::new(agent));
+        }
+    });
     let gossip_rx = gossip.subscribe();
     let gossip_state = state.clone();
     tokio::spawn(async move {

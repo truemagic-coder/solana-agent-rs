@@ -7,6 +7,7 @@ use hyper::client::conn::http1;
 use hyper::Request;
 use hyper_util::rt::TokioIo;
 use serde::Serialize;
+use std::time::Duration;
 
 use crate::error::{ButterflyBotError, Result};
 use crate::interfaces::transport::Transport;
@@ -61,10 +62,15 @@ impl DaemonClient {
                 },
             })
         } else {
+            let client = reqwest::Client::builder()
+                .connect_timeout(Duration::from_secs(3))
+                .timeout(Duration::from_secs(10))
+                .build()
+                .map_err(|e| ButterflyBotError::Runtime(e.to_string()))?;
             Ok(Self {
                 base_url,
                 token,
-                mode: DaemonClientMode::Reqwest(reqwest::Client::new()),
+                mode: DaemonClientMode::Reqwest(client),
             })
         }
     }

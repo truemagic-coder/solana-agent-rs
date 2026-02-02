@@ -1,4 +1,5 @@
 use std::collections::HashSet;
+use std::env;
 use std::sync::Arc;
 
 use serde_json::Value;
@@ -69,10 +70,12 @@ use crate::brain::plugins::zero_cost_reasoning::ZeroCostReasoningBrain;
 use crate::config::Config;
 use crate::domains::agent::BusinessMission;
 use crate::error::{ButterflyBotError, Result};
+use crate::interfaces::providers::LlmProvider;
 use crate::guardrails::pii::{NoopGuardrail, PiiGuardrail};
 use crate::interfaces::guardrails::{InputGuardrail, OutputGuardrail};
 use crate::interfaces::plugins::Tool;
 use crate::providers::memory::InMemoryMemoryProvider;
+use crate::providers::candle_vllm::CandleVllmProvider;
 use crate::providers::openai::OpenAiProvider;
 use crate::providers::sqlite::{SqliteMemoryProvider, SqliteMemoryProviderConfig};
 use crate::reminders::{default_reminder_db_path, resolve_reminder_db_path, ReminderStore};
@@ -98,31 +101,57 @@ impl ButterflyBotFactory {
         let config_value =
             serde_json::to_value(&config).map_err(|e| ButterflyBotError::Config(e.to_string()))?;
         let tools_config = config.tools.clone().unwrap_or(Value::Null);
-        let (api_key, model, base_url) = if let Some(openai) = config.openai {
+        let candle_config = config.candle_vllm.clone();
+        let use_candle = candle_config
+            .as_ref()
+            .and_then(|cfg| cfg.enabled)
+            .unwrap_or(false);
+
+        let openai_config = config.openai.clone();
+        let llm: Arc<dyn LlmProvider> = if use_candle {
+            let cfg = candle_config.ok_or_else(|| {
+                ButterflyBotError::Config("Missing candle_vllm configuration".to_string())
+            })?;
+            Arc::new(CandleVllmProvider::new(&cfg).await?)
+        } else {
+            let (api_key, model, base_url) = if let Some(openai) = openai_config.clone() {
+                let api_key = openai
+                    .api_key
+                    .filter(|key| !key.trim().is_empty())
+                    .or_else(|| {
+                        if openai.base_url.is_some() {
+                            Some("local-llm".to_string())
+                        } else {
+                            None
+                        }
+                    })
+                    .ok_or_else(|| {
+                        ButterflyBotError::Config("Missing OpenAI API key".to_string())
+                    })?;
+                (api_key, openai.model, openai.base_url)
+            } else {
+                return Err(ButterflyBotError::Config(
+                    "Missing openai configuration".to_string(),
+                ));
+            };
+
+            Arc::new(OpenAiProvider::new(api_key, model, base_url))
+        };
+        let llm_for_memory = llm.clone();
+        let openai_credentials = openai_config.as_ref().and_then(|openai| {
             let api_key = openai
                 .api_key
+                .clone()
                 .filter(|key| !key.trim().is_empty())
                 .or_else(|| {
                     if openai.base_url.is_some() {
-                        Some("ollama".to_string())
+                        Some("local-llm".to_string())
                     } else {
                         None
                     }
-                })
-                .ok_or_else(|| ButterflyBotError::Config("Missing OpenAI API key".to_string()))?;
-            (api_key, openai.model, openai.base_url)
-        } else {
-            return Err(ButterflyBotError::Config(
-                "Missing openai configuration".to_string(),
-            ));
-        };
-
-        let llm = Arc::new(OpenAiProvider::new(
-            api_key.clone(),
-            model,
-            base_url.clone(),
-        ));
-        let llm_for_memory = llm.clone();
+                });
+            api_key.map(|key| (key, openai.base_url.clone()))
+        });
 
         let business_mission = config.business.map(|b| {
             let mut mission = BusinessMission::default();
@@ -409,26 +438,78 @@ impl ButterflyBotFactory {
                     let lancedb_path = memory
                         .lancedb_path
                         .unwrap_or_else(|| "./data/lancedb".to_string());
-                    let reranker = memory.rerank_model.as_ref().map(|rerank_model| {
-                        Arc::new(OpenAiProvider::new(
-                            api_key.clone(),
-                            Some(rerank_model.clone()),
-                            base_url.clone(),
-                        ))
-                            as Arc<dyn crate::interfaces::providers::LlmProvider>
-                    });
-                    let summarizer = memory.summary_model.as_ref().map(|summary_model| {
-                        Arc::new(OpenAiProvider::new(
-                            api_key.clone(),
-                            Some(summary_model.clone()),
-                            base_url.clone(),
-                        ))
-                            as Arc<dyn crate::interfaces::providers::LlmProvider>
-                    });
+                    let memory_models_enabled = env::var("BUTTERFLY_BOT_ENABLE_MEMORY_MODELS")
+                        .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
+                        .unwrap_or(false);
+                    let embedding_model = if memory_models_enabled {
+                        memory
+                            .embedding_model
+                            .as_ref()
+                            .filter(|model| !model.trim().is_empty())
+                            .cloned()
+                    } else {
+                        None
+                    };
+                    let reranker = if memory_models_enabled {
+                        let rerank_model = memory.rerank_model.as_ref().and_then(|rerank_model| {
+                            if rerank_model.trim().is_empty() {
+                                None
+                            } else {
+                                Some(rerank_model)
+                            }
+                        });
+                        match (rerank_model, openai_credentials.as_ref()) {
+                            (Some(rerank_model), Some((api_key, base_url))) => Some(
+                                Arc::new(OpenAiProvider::new(
+                                    api_key.clone(),
+                                    Some(rerank_model.clone()),
+                                    base_url.clone(),
+                                )) as Arc<dyn crate::interfaces::providers::LlmProvider>,
+                            ),
+                            (Some(_), None) => {
+                                return Err(ButterflyBotError::Config(
+                                    "Missing openai configuration for memory reranker"
+                                        .to_string(),
+                                ))
+                            }
+                            _ => None,
+                        }
+                    } else {
+                        None
+                    };
+                    let summarizer = if memory_models_enabled {
+                        let summary_model = memory.summary_model.as_ref().and_then(|summary_model| {
+                            if summary_model.trim().is_empty() {
+                                None
+                            } else {
+                                Some(summary_model)
+                            }
+                        });
+                        match (summary_model, openai_credentials.as_ref()) {
+                            (Some(summary_model), Some((api_key, base_url))) => Some(
+                                Arc::new(OpenAiProvider::new(
+                                    api_key.clone(),
+                                    Some(summary_model.clone()),
+                                    base_url.clone(),
+                                )) as Arc<dyn crate::interfaces::providers::LlmProvider>,
+                            ),
+                            (Some(_), None) => {
+                                return Err(ButterflyBotError::Config(
+                                    "Missing openai configuration for memory summarizer"
+                                        .to_string(),
+                                ))
+                            }
+                            _ => None,
+                        }
+                    } else {
+                        None
+                    };
                     let mut memory_provider_config = SqliteMemoryProviderConfig::new(sqlite_path);
-                    memory_provider_config.lancedb_path = Some(lancedb_path);
-                    memory_provider_config.embedder = Some(llm_for_memory.clone());
-                    memory_provider_config.embedding_model = memory.embedding_model.clone();
+                    if memory_models_enabled && embedding_model.is_some() {
+                        memory_provider_config.lancedb_path = Some(lancedb_path);
+                        memory_provider_config.embedder = Some(llm_for_memory.clone());
+                    }
+                    memory_provider_config.embedding_model = embedding_model;
                     memory_provider_config.reranker = reranker;
                     memory_provider_config.summarizer = summarizer;
                     memory_provider_config.summary_threshold = memory.summary_threshold;

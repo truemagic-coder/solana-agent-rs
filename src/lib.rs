@@ -1,4 +1,5 @@
 pub mod brain;
+pub mod candle_vllm;
 pub mod client;
 pub mod config;
 pub mod config_store;

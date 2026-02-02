@@ -10,8 +10,9 @@ use diesel::prelude::*;
 use diesel::sql_types::{BigInt, Text};
 use diesel::sqlite::SqliteConnection;
 use diesel_async::pooled_connection::bb8::{Pool, PooledConnection};
-use diesel_async::pooled_connection::AsyncDieselConnectionManager;
+use diesel_async::pooled_connection::{AsyncDieselConnectionManager, ManagerConfig, RecyclingMethod};
 use diesel_async::sync_connection_wrapper::SyncConnectionWrapper;
+use diesel_async::AsyncConnection;
 use diesel_async::RunQueryDsl;
 use diesel_migrations::{embed_migrations, EmbeddedMigrations, MigrationHarness};
 use futures::TryStreamExt;
@@ -305,9 +306,26 @@ impl SqliteMemoryProvider {
         ensure_parent_dir(&config.sqlite_path)?;
         run_migrations(&config.sqlite_path).await?;
 
-        let manager =
-            AsyncDieselConnectionManager::<SqliteAsyncConn>::new(config.sqlite_path.as_str());
+        let db_path = config.sqlite_path.clone();
+        let mut manager_config = ManagerConfig::default();
+        manager_config.recycling_method = RecyclingMethod::Verified;
+        manager_config.custom_setup = Box::new(move |database_url| {
+            let db_path = db_path.clone();
+            let database_url = database_url.to_string();
+            Box::pin(async move {
+                let mut conn = SqliteAsyncConn::establish(&database_url).await?;
+                apply_sqlcipher_key_async(&mut conn, &db_path)
+                    .await
+                    .map_err(|e| diesel::ConnectionError::BadConnection(e.to_string()))?;
+                Ok(conn)
+            })
+        });
+        let manager = AsyncDieselConnectionManager::<SqliteAsyncConn>::new_with_config(
+            config.sqlite_path.as_str(),
+            manager_config,
+        );
         let pool: SqlitePool = Pool::builder()
+            .max_size(1)
             .build(manager)
             .await
             .map_err(|e| ButterflyBotError::Runtime(e.to_string()))?;
@@ -421,19 +439,11 @@ impl MemoryProvider for SqliteMemoryProvider {
         }
 
         if role == "assistant" {
-            let provider = self.clone();
-            let user_id = user_id.to_string();
-            tokio::spawn(async move {
-                let _ = provider.maybe_summarize(&user_id).await;
-            });
+            let _ = self.maybe_summarize(user_id).await;
         }
 
         if let Some(days) = self.retention_days {
-            let provider = self.clone();
-            let user_id = user_id.to_string();
-            tokio::spawn(async move {
-                let _ = provider.apply_retention(&user_id, days).await;
-            });
+            let _ = self.apply_retention(user_id, days).await;
         }
         Ok(())
     }

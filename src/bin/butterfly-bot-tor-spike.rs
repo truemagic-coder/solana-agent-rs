@@ -3,6 +3,7 @@ use butterfly_bot::tor_spike::tor_http_get;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    butterfly_bot::sqlcipher::configure_sqlcipher_logging();
     let host = env::args()
         .nth(1)
         .unwrap_or_else(|| "example.com".to_string());
