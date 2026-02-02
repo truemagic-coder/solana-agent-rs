@@ -27,7 +27,7 @@ Privacy is a core principle for Butterfly Bot:
 
 ## Ollama Models Used
 
-- glm-4.7-flash (agent/router)
+- ministral-3:14b (agent/router)
 - embeddinggemma (embedding)
 - qllama/bge-reranker-v2-m3 (reranking)
 

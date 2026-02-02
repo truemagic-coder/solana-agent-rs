@@ -808,7 +808,7 @@ fn run_onboarding(db_path: &str) -> Result<()> {
     println!();
 
     let base_url = "http://localhost:11434/v1".to_string();
-    let model = "glm-4.7-flash:latest".to_string();
+    let model = "ministral-3:14b".to_string();
     let memory_enabled = true;
 
     let memory = if memory_enabled {

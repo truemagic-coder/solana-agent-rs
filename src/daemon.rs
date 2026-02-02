@@ -342,7 +342,7 @@ pub async fn run(host: &str, port: u16, db_path: &str, token: &str) -> Result<()
 
 fn default_config(db_path: &str) -> Config {
     let base_url = "http://localhost:11434/v1".to_string();
-    let model = "glm-4.7-flash:latest".to_string();
+    let model = "ministral-3:14b".to_string();
     let memory = Some(MemoryConfig {
         enabled: Some(true),
         sqlite_path: Some(db_path.to_string()),
