@@ -1,5 +1,6 @@
 use butterfly_bot::daemon;
 use butterfly_bot::error::Result;
+use butterfly_bot::sqlcipher;
 use clap::Parser;
 use tracing_subscriber::EnvFilter;
 
@@ -25,6 +26,7 @@ async fn main() -> Result<()> {
     let filter = EnvFilter::try_from_default_env()
         .unwrap_or_else(|_| EnvFilter::new("info,butterfly_bot=info,lance=warn,lancedb=warn"));
     tracing_subscriber::fmt().with_env_filter(filter).init();
+    sqlcipher::configure_sqlcipher_logging();
     let cli = Cli::parse();
 
     daemon::run(&cli.host, cli.port, &cli.db, &cli.token).await

@@ -18,6 +18,8 @@ use reqwest::header::AUTHORIZATION;
 #[cfg(not(test))]
 use std::collections::{HashMap, HashSet};
 #[cfg(not(test))]
+use std::env;
+#[cfg(not(test))]
 use std::io::{self as std_io, BufWriter, Write};
 #[cfg(not(test))]
 use std::process::Command;
@@ -27,7 +29,8 @@ use syntect::parsing::SyntaxSet;
 use tokio::io::{self, AsyncBufReadExt};
 
 #[cfg(not(test))]
-use butterfly_bot::config::{AgentConfig, Config, MemoryConfig, OpenAiConfig};
+use butterfly_bot::candle_vllm::DEFAULT_CANDLE_MODEL_ID;
+use butterfly_bot::config::{AgentConfig, CandleVllmConfig, Config, MemoryConfig, OpenAiConfig};
 #[cfg(not(test))]
 use butterfly_bot::config_store;
 #[cfg(not(test))]
@@ -38,6 +41,8 @@ use butterfly_bot::error::Result;
 use butterfly_bot::interfaces::plugins::Tool;
 #[cfg(not(test))]
 use butterfly_bot::plugins::registry::ToolRegistry;
+#[cfg(not(test))]
+use butterfly_bot::sqlcipher;
 #[cfg(not(test))]
 use butterfly_bot::tools::search_internet::SearchInternetTool;
 #[cfg(not(test))]
@@ -155,7 +160,7 @@ fn print_banner(daemon: &str, user_id: &str) {
     println!(
         "{}",
         style(format!(
-            "Ollama-ready • Streaming CLI • Daemon: {} • User: {}",
+            "Candle-vLLM-ready • Streaming CLI • Daemon: {} • User: {}",
             daemon, user_id
         ))
         .color256(250)
@@ -321,9 +326,12 @@ async fn main() -> Result<()> {
     let filter = EnvFilter::try_from_default_env()
         .unwrap_or_else(|_| EnvFilter::new("info,butterfly_bot=info,lance=warn,lancedb=warn"));
     tracing_subscriber::fmt().with_env_filter(filter).init();
+    sqlcipher::configure_sqlcipher_logging();
 
     let cli = Cli::parse();
     if !cli.cli_mode {
+        let _daemon_shutdown = ensure_daemon_running(&cli).await?;
+        env::set_var("BUTTERFLY_BOT_DISABLE_DAEMON", "1");
         ui::launch_ui();
         return Ok(());
     }
@@ -804,19 +812,33 @@ fn update_tool_state(config: &mut Config, name: &str, enable: bool) -> Result<bo
 #[cfg(not(test))]
 fn run_onboarding(db_path: &str) -> Result<()> {
     println!("{}", style("ButterFly Bot setup").color256(214).bold());
-    println!("{}", style("Using local Ollama defaults.").color256(245));
+    println!("{}", style("Using local candle-vLLM defaults.").color256(245));
     println!();
 
-    let base_url = "http://localhost:11434/v1".to_string();
-    let model = "glm-4.7-flash:latest".to_string();
+    let candle = CandleVllmConfig {
+        enabled: Some(true),
+        model_id: Some(DEFAULT_CANDLE_MODEL_ID.to_string()),
+        weight_path: None,
+        gguf_file: None,
+        hf_token: None,
+        device_ids: None,
+        kvcache_mem_gpu: None,
+        kvcache_mem_cpu: None,
+        temperature: None,
+        top_p: None,
+        dtype: None,
+        isq: None,
+        binary_path: None,
+        host: None,
+        port: None,
+        extra_args: None,
+    };
+    let model = DEFAULT_CANDLE_MODEL_ID.to_string();
     let memory_enabled = true;
 
     let memory = if memory_enabled {
         let sqlite_path = prompt_with_default("Memory SQLite path", db_path)?;
         let lancedb_path = prompt_with_default("LanceDB path", "./data/lancedb")?;
-        let embedding_model = "embeddinggemma:latest".to_string();
-        let rerank_model = "qllama/bge-reranker-v2-m3".to_string();
-        let summary_model = model.clone();
         let summary_threshold = prompt_optional_u32("Summary threshold (messages)")?;
         let retention_days = prompt_optional_u32("Retention days (blank for unlimited)")?;
 
@@ -824,9 +846,9 @@ fn run_onboarding(db_path: &str) -> Result<()> {
             enabled: Some(true),
             sqlite_path: Some(sqlite_path),
             lancedb_path: Some(lancedb_path),
-            summary_model: Some(summary_model),
-            embedding_model: Some(embedding_model),
-            rerank_model: Some(rerank_model),
+            summary_model: None,
+            embedding_model: None,
+            rerank_model: None,
             summary_threshold: summary_threshold.map(|value| value as usize),
             retention_days,
         })
@@ -847,8 +869,9 @@ fn run_onboarding(db_path: &str) -> Result<()> {
         openai: Some(OpenAiConfig {
             api_key: None,
             model: Some(model),
-            base_url: Some(base_url),
+            base_url: None,
         }),
+        candle_vllm: Some(candle),
         agents: vec![AgentConfig {
             name: "default_agent".to_string(),
             description: Some("Butterfly, an expert conversationalist and assistant.".to_string()),
@@ -960,6 +983,14 @@ fn parse_daemon_address(daemon: &str) -> (String, u16) {
 
 #[cfg(not(test))]
 fn ensure_ollama_models(config: &Config) -> Result<()> {
+    if config
+        .candle_vllm
+        .as_ref()
+        .and_then(|cfg| cfg.enabled)
+        .unwrap_or(false)
+    {
+        return Ok(());
+    }
     let Some(openai) = &config.openai else {
         return Ok(());
     };
@@ -976,17 +1007,22 @@ fn ensure_ollama_models(config: &Config) -> Result<()> {
             required.push(model.clone());
         }
     }
-    if let Some(memory) = &config.memory {
-        for value in [
-            memory.embedding_model.as_ref(),
-            memory.rerank_model.as_ref(),
-            memory.summary_model.as_ref(),
-        ]
-        .into_iter()
-        .flatten()
-        {
-            if !value.trim().is_empty() {
-                required.push(value.clone());
+    let memory_models_enabled = std::env::var("BUTTERFLY_BOT_ENABLE_MEMORY_MODELS")
+        .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
+        .unwrap_or(false);
+    if memory_models_enabled {
+        if let Some(memory) = &config.memory {
+            for value in [
+                memory.embedding_model.as_ref(),
+                memory.rerank_model.as_ref(),
+                memory.summary_model.as_ref(),
+            ]
+            .into_iter()
+            .flatten()
+            {
+                if !value.trim().is_empty() {
+                    required.push(value.clone());
+                }
             }
         }
     }
@@ -1047,6 +1083,46 @@ fn pull_ollama_model(model: &str) -> Result<()> {
         Err(butterfly_bot::error::ButterflyBotError::Runtime(format!(
             "Failed to pull model '{model}'"
         )))
+    }
+}
+
+#[cfg(not(test))]
+async fn ensure_daemon_running(cli: &Cli) -> Result<Option<DaemonShutdown>> {
+    if is_daemon_healthy(cli).await {
+        return Ok(None);
+    }
+
+    let (host, port) = parse_daemon_address(&cli.daemon);
+    let token = cli.token.clone().unwrap_or_default();
+    let db_path = cli.db.clone();
+    let (tx, rx) = oneshot::channel::<()>();
+    tokio::spawn(async move {
+        let _ = daemon::run_with_shutdown(&host, port, &db_path, &token, async {
+            let _ = rx.await;
+        })
+        .await;
+    });
+    Ok(Some(DaemonShutdown(Some(tx))))
+}
+
+#[cfg(not(test))]
+async fn is_daemon_healthy(cli: &Cli) -> bool {
+    let client = match reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(2))
+        .build()
+    {
+        Ok(client) => client,
+        Err(_) => return false,
+    };
+    let url = format!("{}/health", cli.daemon.trim_end_matches('/'));
+    let token = cli.token.as_deref().unwrap_or("");
+    let mut request = client.get(url);
+    if !token.trim().is_empty() {
+        request = request.header("x-api-key", token);
+    }
+    match request.send().await {
+        Ok(response) => response.status().is_success(),
+        Err(_) => false,
     }
 }
 

@@ -1,8 +1,10 @@
 pub mod brain;
+pub mod candle_vllm;
 pub mod client;
 pub mod config;
 pub mod config_store;
 pub mod daemon;
+pub mod e2e;
 pub mod domains;
 pub mod error;
 pub mod factories;
@@ -13,7 +15,9 @@ pub mod providers;
 pub mod reminders;
 pub mod scheduler;
 pub mod services;
+pub mod sqlcipher;
 pub mod tools;
+pub mod tor_spike;
 pub mod ui;
 pub mod vault;
 

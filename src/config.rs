@@ -13,6 +13,26 @@ pub struct OpenAiConfig {
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct CandleVllmConfig {
+    pub enabled: Option<bool>,
+    pub model_id: Option<String>,
+    pub weight_path: Option<String>,
+    pub gguf_file: Option<String>,
+    pub hf_token: Option<String>,
+    pub device_ids: Option<Vec<usize>>,
+    pub kvcache_mem_gpu: Option<usize>,
+    pub kvcache_mem_cpu: Option<usize>,
+    pub temperature: Option<f32>,
+    pub top_p: Option<f32>,
+    pub dtype: Option<String>,
+    pub isq: Option<String>,
+    pub binary_path: Option<String>,
+    pub host: Option<String>,
+    pub port: Option<u16>,
+    pub extra_args: Option<Vec<String>>,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct GuardrailConfig {
     pub class: String,
     pub config: Option<Value>,
@@ -63,6 +83,7 @@ pub struct MemoryConfig {
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct Config {
     pub openai: Option<OpenAiConfig>,
+    pub candle_vllm: Option<CandleVllmConfig>,
     pub agents: Vec<AgentConfig>,
     pub business: Option<BusinessConfig>,
     pub memory: Option<MemoryConfig>,

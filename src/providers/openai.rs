@@ -3,7 +3,10 @@ use async_trait::async_trait;
 use base64::{engine::general_purpose, Engine as _};
 use futures::stream::BoxStream;
 use futures::StreamExt;
+use once_cell::sync::Lazy;
 use serde_json::Value;
+use std::sync::Arc;
+use tokio::sync::Semaphore;
 
 use async_openai::{
     config::OpenAIConfig,
@@ -32,23 +35,62 @@ use crate::interfaces::providers::{
     ChatEvent, ImageData, ImageInput, LlmProvider, LlmResponse, ToolCall,
 };
 
+static LOCAL_LLM_GUARD: Lazy<Arc<Semaphore>> = Lazy::new(|| Arc::new(Semaphore::new(1)));
+
 #[derive(Clone)]
 pub struct OpenAiProvider {
     model: String,
     client: Client<OpenAIConfig>,
+    is_local: bool,
 }
 
 impl OpenAiProvider {
     pub fn new(api_key: String, model: Option<String>, base_url: Option<String>) -> Self {
         let model = model.unwrap_or_else(|| "gpt-5.2".to_string());
         let base_url = base_url.unwrap_or_else(|| "https://api.openai.com/v1".to_string());
+        let is_local = is_local_base_url(&base_url);
         let config = OpenAIConfig::new()
             .with_api_key(api_key)
-            .with_api_base(base_url);
+            .with_api_base(base_url.clone());
         Self {
             model,
             client: Client::with_config(config),
+            is_local,
         }
+    }
+
+    async fn local_guard(&self) -> Option<tokio::sync::OwnedSemaphorePermit> {
+        if self.is_local {
+            let permit = LOCAL_LLM_GUARD
+                .clone()
+                .acquire_owned()
+                .await
+                .expect("local llm guard closed");
+            Some(permit)
+        } else {
+            None
+        }
+    }
+
+    fn build_prompts_from_messages(messages: &[Value]) -> (String, String) {
+        let mut system_prompt = String::new();
+        let mut user_prompt = String::new();
+        for message in messages {
+            let role = message.get("role").and_then(|v| v.as_str()).unwrap_or("user");
+            let content = message.get("content").and_then(|v| v.as_str()).unwrap_or("");
+            if role == "system" {
+                if !system_prompt.is_empty() {
+                    system_prompt.push_str("\n\n");
+                }
+                system_prompt.push_str(content);
+            } else {
+                if !user_prompt.is_empty() {
+                    user_prompt.push_str("\n\n");
+                }
+                user_prompt.push_str(content);
+            }
+        }
+        (user_prompt, system_prompt)
     }
 
     fn build_system_message(system_prompt: &str) -> Result<Option<ChatCompletionRequestMessage>> {
@@ -235,6 +277,16 @@ impl OpenAiProvider {
     }
 }
 
+fn is_local_base_url(base_url: &str) -> bool {
+    let trimmed = base_url.trim();
+    trimmed.starts_with("http://localhost:")
+        || trimmed.starts_with("http://127.0.0.1:")
+        || trimmed.starts_with("http://[::1]:")
+        || trimmed.starts_with("https://localhost:")
+        || trimmed.starts_with("https://127.0.0.1:")
+        || trimmed.starts_with("https://[::1]:")
+}
+
 #[async_trait]
 impl LlmProvider for OpenAiProvider {
     async fn generate_text(
@@ -243,6 +295,7 @@ impl LlmProvider for OpenAiProvider {
         system_prompt: &str,
         tools: Option<Vec<Value>>,
     ) -> Result<String> {
+        let _guard = self.local_guard().await;
         let mut messages = Vec::new();
         if let Some(system) = Self::build_system_message(system_prompt)? {
             messages.push(system);
@@ -275,6 +328,7 @@ impl LlmProvider for OpenAiProvider {
     }
 
     async fn embed(&self, inputs: Vec<String>, model: Option<&str>) -> Result<Vec<Vec<f32>>> {
+        let _guard = self.local_guard().await;
         let model = model.unwrap_or(&self.model).to_string();
         let request = CreateEmbeddingRequestArgs::default()
             .model(model)
@@ -297,6 +351,7 @@ impl LlmProvider for OpenAiProvider {
         system_prompt: &str,
         tools: Vec<Value>,
     ) -> Result<LlmResponse> {
+        let _guard = self.local_guard().await;
         let mut messages = Vec::new();
         if let Some(system) = Self::build_system_message(system_prompt)? {
             messages.push(system);
@@ -334,6 +389,29 @@ impl LlmProvider for OpenAiProvider {
         tools: Option<Vec<Value>>,
     ) -> BoxStream<'static, Result<ChatEvent>> {
         let provider = self.clone();
+
+        if provider.is_local
+            || std::env::var("BUTTERFLY_BOT_DISABLE_STREAM")
+                .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
+                .unwrap_or(false)
+        {
+            return Box::pin(try_stream! {
+                let (prompt, system_prompt) = OpenAiProvider::build_prompts_from_messages(&messages);
+                let text = provider
+                    .generate_text(&prompt, &system_prompt, tools)
+                    .await?;
+                if !text.is_empty() {
+                    yield ChatEvent {
+                        event_type: "content".to_string(),
+                        delta: Some(text),
+                        name: None,
+                        arguments_delta: None,
+                        finish_reason: Some("stop".to_string()),
+                        error: None,
+                    };
+                }
+            });
+        }
 
         Box::pin(try_stream! {
             let mut request_messages = Vec::new();
@@ -414,6 +492,7 @@ impl LlmProvider for OpenAiProvider {
         json_schema: Value,
         tools: Option<Vec<Value>>,
     ) -> Result<Value> {
+        let _guard = self.local_guard().await;
         let mut messages = Vec::new();
         if let Some(system) = Self::build_system_message(system_prompt)? {
             messages.push(system);
@@ -464,6 +543,7 @@ impl LlmProvider for OpenAiProvider {
     }
 
     async fn tts(&self, text: &str, voice: &str, response_format: &str) -> Result<Vec<u8>> {
+        let _guard = self.local_guard().await;
         let request = CreateSpeechRequestArgs::default()
             .model(SpeechModel::Tts1)
             .input(text)
@@ -484,6 +564,7 @@ impl LlmProvider for OpenAiProvider {
     }
 
     async fn transcribe_audio(&self, audio_bytes: Vec<u8>, input_format: &str) -> Result<String> {
+        let _guard = self.local_guard().await;
         let file = AudioInput {
             source: InputSource::VecU8 {
                 filename: format!("audio.{}", input_format),
@@ -517,6 +598,7 @@ impl LlmProvider for OpenAiProvider {
         detail: &str,
         tools: Option<Vec<Value>>,
     ) -> Result<String> {
+        let _guard = self.local_guard().await;
         let mut messages = Vec::new();
         if let Some(system) = Self::build_system_message(system_prompt)? {
             messages.push(system);

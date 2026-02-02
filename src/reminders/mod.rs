@@ -4,13 +4,15 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use diesel::prelude::*;
 use diesel::sqlite::SqliteConnection;
 use diesel_async::pooled_connection::bb8::{Pool, PooledConnection};
-use diesel_async::pooled_connection::AsyncDieselConnectionManager;
+use diesel_async::pooled_connection::{AsyncDieselConnectionManager, ManagerConfig, RecyclingMethod};
 use diesel_async::sync_connection_wrapper::SyncConnectionWrapper;
+use diesel_async::AsyncConnection;
 use diesel_async::RunQueryDsl;
 use diesel_migrations::{embed_migrations, EmbeddedMigrations, MigrationHarness};
 use serde::Serialize;
 
 use crate::error::{ButterflyBotError, Result};
+use crate::sqlcipher::{apply_sqlcipher_key, apply_sqlcipher_key_async};
 
 mod schema;
 use schema::reminders;
@@ -55,6 +57,7 @@ struct NewReminder<'a> {
 
 pub struct ReminderStore {
     pool: SqlitePool,
+    sqlite_path: String,
 }
 
 impl ReminderStore {
@@ -63,12 +66,31 @@ impl ReminderStore {
         ensure_parent_dir(sqlite_path)?;
         run_migrations(sqlite_path).await?;
 
-        let manager = AsyncDieselConnectionManager::<SqliteAsyncConn>::new(sqlite_path);
+        let db_path = sqlite_path.to_string();
+        let mut manager_config: ManagerConfig<SqliteAsyncConn> = ManagerConfig::default();
+        manager_config.recycling_method = RecyclingMethod::Verified;
+        manager_config.custom_setup = Box::new(move |database_url| {
+            let db_path = db_path.clone();
+            let database_url = database_url.to_string();
+            Box::pin(async move {
+                let mut conn = SqliteAsyncConn::establish(&database_url).await?;
+                apply_sqlcipher_key_async(&mut conn, &db_path)
+                    .await
+                    .map_err(|e| diesel::ConnectionError::BadConnection(e.to_string()))?;
+                Ok(conn)
+            })
+        });
+        let manager =
+            AsyncDieselConnectionManager::<SqliteAsyncConn>::new_with_config(sqlite_path, manager_config);
         let pool: SqlitePool = Pool::builder()
+            .max_size(1)
             .build(manager)
             .await
             .map_err(|e| ButterflyBotError::Runtime(e.to_string()))?;
-        Ok(Self { pool })
+        Ok(Self {
+            pool,
+            sqlite_path: sqlite_path.to_string(),
+        })
     }
 
     pub async fn create_reminder(
@@ -240,10 +262,13 @@ impl ReminderStore {
     }
 
     async fn conn(&self) -> Result<SqlitePooledConn<'_>> {
-        self.pool
+        let mut conn = self
+            .pool
             .get()
             .await
-            .map_err(|e| ButterflyBotError::Runtime(e.to_string()))
+            .map_err(|e| ButterflyBotError::Runtime(e.to_string()))?;
+        apply_sqlcipher_key_async(&mut conn, &self.sqlite_path).await?;
+        Ok(conn)
     }
 }
 
@@ -305,6 +330,7 @@ async fn run_migrations(database_url: &str) -> Result<()> {
     tokio::task::spawn_blocking(move || {
         let mut conn = SqliteConnection::establish(&database_url)
             .map_err(|e| ButterflyBotError::Runtime(e.to_string()))?;
+        apply_sqlcipher_key(&mut conn, &database_url)?;
         conn.run_pending_migrations(MIGRATIONS)
             .map_err(|e| ButterflyBotError::Runtime(e.to_string()))?;
         Ok::<_, ButterflyBotError>(())
