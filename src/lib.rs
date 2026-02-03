@@ -19,6 +19,7 @@ pub mod vault;
 pub mod wakeup;
 pub mod todo;
 pub mod planning;
+pub mod tasks;
 
 pub type Result<T> = std::result::Result<T, error::ButterflyBotError>;
 

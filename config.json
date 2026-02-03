@@ -10,7 +10,7 @@
       "instructions": "You are Butterfly, a helpful assistant.",
       "specialization": "general",
       "description": "Primary assistant",
-      "tools": ["search_internet", "reminders", "mcp", "wakeup", "http_call", "todo", "planning"]
+      "tools": ["search_internet", "reminders", "mcp", "wakeup", "http_call", "todo", "planning", "tasks"]
     }
   ],
   "business": {
@@ -46,7 +46,8 @@
         "wakeup": true,
         "http_call": true,
         "todo": true,
-        "planning": true
+        "planning": true,
+        "tasks": true
       }
     },
     "search_internet": {
@@ -91,6 +92,11 @@
       "sqlite_path": "./data/butterfly-bot.db"
     },
     "planning": {
+      "sqlite_path": "./data/butterfly-bot.db"
+    },
+    "tasks": {
+      "poll_seconds": 60,
+      "audit_log_path": "./data/tasks_audit.log",
       "sqlite_path": "./data/butterfly-bot.db"
     }
   },

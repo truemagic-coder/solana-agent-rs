@@ -21,6 +21,7 @@ use crate::config_store;
 use crate::error::{ButterflyBotError, Result};
 use crate::interfaces::scheduler::ScheduledJob;
 use crate::reminders::ReminderStore;
+use crate::tasks::TaskStore;
 use crate::wakeup::WakeupStore;
 use crate::scheduler::Scheduler;
 use crate::services::agent::UiEvent;
@@ -62,6 +63,91 @@ struct WakeupJob {
     interval: Duration,
     ui_event_tx: broadcast::Sender<UiEvent>,
     audit_log_path: Option<String>,
+}
+
+struct ScheduledTasksJob {
+    agent: Arc<ButterflyBot>,
+    store: Arc<TaskStore>,
+    interval: Duration,
+    ui_event_tx: broadcast::Sender<UiEvent>,
+    audit_log_path: Option<String>,
+}
+
+#[async_trait::async_trait]
+impl ScheduledJob for ScheduledTasksJob {
+    fn name(&self) -> &str {
+        "scheduled_tasks"
+    }
+
+    fn interval(&self) -> Duration {
+        self.interval
+    }
+
+    async fn run(&self) -> Result<()> {
+        let now = now_ts();
+        let tasks = self.store.list_due(now, 32).await?;
+        for task in tasks {
+            let run_at = now_ts();
+            let next_run_at = if let Some(interval) = task.interval_minutes {
+                run_at + interval.max(1) * 60
+            } else {
+                run_at
+            };
+
+            if task.interval_minutes.is_some() {
+                let _ = self.store.mark_run(task.id, run_at, next_run_at).await;
+            } else {
+                let _ = self.store.complete_one_shot(task.id).await;
+            }
+
+            let options = ProcessOptions {
+                prompt: None,
+                images: Vec::new(),
+                output_format: OutputFormat::Text,
+                image_detail: "auto".to_string(),
+                json_schema: None,
+                router: None,
+            };
+            let input = format!("Scheduled task '{}': {}", task.name, task.prompt);
+            let result = self
+                .agent
+                .process(&task.user_id, UserInput::Text(input), options)
+                .await;
+
+            let (status, payload): (String, serde_json::Value) = match result {
+                Ok(ProcessResult::Text(text)) => (
+                    "ok".to_string(),
+                    json!({"task_id": task.id, "name": task.name, "output": text}),
+                ),
+                Ok(other) => (
+                    "ok".to_string(),
+                    json!({"task_id": task.id, "name": task.name, "output": format!("{other:?}")}),
+                ),
+                Err(err) => (
+                    "error".to_string(),
+                    json!({"task_id": task.id, "name": task.name, "error": err.to_string()}),
+                ),
+            };
+
+            let event = UiEvent {
+                event_type: "tasks".to_string(),
+                user_id: task.user_id.clone(),
+                tool: "tasks".to_string(),
+                status: status.clone(),
+                payload: payload.clone(),
+                timestamp: run_at,
+            };
+            let _ = self.ui_event_tx.send(event);
+            let _ = write_tasks_audit_log(
+                self.audit_log_path.as_deref(),
+                run_at,
+                &task,
+                status.as_str(),
+                payload,
+            );
+        }
+        Ok(())
+    }
 }
 
 #[async_trait::async_trait]
@@ -504,6 +590,7 @@ where
     let agent =
         Arc::new(ButterflyBot::from_store_with_events(db_path, Some(ui_event_tx.clone())).await?);
     let reminder_store = Arc::new(ReminderStore::new(db_path).await?);
+    let task_store = Arc::new(TaskStore::new(db_path).await?);
     let wakeup_store = Arc::new(WakeupStore::new(db_path).await?);
     let mut scheduler = Scheduler::new();
     scheduler.register_job(Arc::new(BrainTickJob {
@@ -523,6 +610,20 @@ where
         interval: Duration::from_secs(wakeup_poll_seconds.max(1)),
         ui_event_tx: ui_event_tx.clone(),
         audit_log_path: wakeup_audit_log_path(config.as_ref()),
+    }));
+    let tasks_poll_seconds = config
+        .as_ref()
+        .and_then(|cfg| cfg.tools.as_ref())
+        .and_then(|tools| tools.get("tasks"))
+        .and_then(|tasks| tasks.get("poll_seconds"))
+        .and_then(|value| value.as_u64())
+        .unwrap_or(60);
+    scheduler.register_job(Arc::new(ScheduledTasksJob {
+        agent: agent.clone(),
+        store: task_store.clone(),
+        interval: Duration::from_secs(tasks_poll_seconds.max(1)),
+        ui_event_tx: ui_event_tx.clone(),
+        audit_log_path: tasks_audit_log_path(config.as_ref()),
     }));
     scheduler.start();
 
@@ -592,6 +693,52 @@ fn write_wakeup_audit_log(
         "user_id": task.user_id,
         "name": task.name,
         "prompt": task.prompt,
+        "status": status,
+        "payload": payload,
+    });
+    let line = serde_json::to_string(&entry)
+        .map_err(|e| ButterflyBotError::Serialization(e.to_string()))?;
+    use std::io::Write;
+    writeln!(file, "{line}").map_err(|e| ButterflyBotError::Runtime(e.to_string()))?;
+    Ok(())
+}
+
+fn tasks_audit_log_path(config: Option<&Config>) -> Option<String> {
+    let path = config
+        .and_then(|cfg| cfg.tools.as_ref())
+        .and_then(|tools| tools.get("tasks"))
+        .and_then(|tasks| tasks.get("audit_log_path"))
+        .and_then(|value| value.as_str())
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+        .or_else(|| Some("./data/tasks_audit.log".to_string()));
+    path
+}
+
+fn write_tasks_audit_log(
+    path: Option<&str>,
+    ts: i64,
+    task: &crate::tasks::ScheduledTask,
+    status: &str,
+    payload: serde_json::Value,
+) -> Result<()> {
+    let Some(path) = path else {
+        return Ok(());
+    };
+    config_store::ensure_parent_dir(path)?;
+    let mut file = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(path)
+        .map_err(|e| ButterflyBotError::Runtime(e.to_string()))?;
+    let entry = serde_json::json!({
+        "timestamp": ts,
+        "task_id": task.id,
+        "user_id": task.user_id,
+        "name": task.name,
+        "prompt": task.prompt,
+        "run_at": task.run_at,
+        "interval_minutes": task.interval_minutes,
         "status": status,
         "payload": payload,
     });

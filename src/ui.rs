@@ -16,7 +16,7 @@ use std::env;
 use std::thread;
 use tokio::time::{sleep, timeout, Duration};
 
-const AVAILABLE_TOOLS: [&str; 7] = [
+const AVAILABLE_TOOLS: [&str; 8] = [
     "search_internet",
     "reminders",
     "mcp",
@@ -24,6 +24,7 @@ const AVAILABLE_TOOLS: [&str; 7] = [
     "http_call",
     "todo",
     "planning",
+    "tasks",
 ];
 
 #[derive(Clone, Serialize)]

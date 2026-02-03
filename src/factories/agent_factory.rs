@@ -86,6 +86,7 @@ use crate::tools::search_internet::SearchInternetTool;
 use crate::tools::wakeup::WakeupTool;
 use crate::tools::todo::TodoTool;
 use crate::tools::planning::PlanningTool;
+use crate::tools::tasks::TasksTool;
 use tokio::sync::broadcast;
 
 pub struct ButterflyBotFactory;
@@ -368,6 +369,7 @@ impl ButterflyBotFactory {
         let has_http_call_config = tools_config.get("http_call").is_some();
         let has_todo_config = tools_config.get("todo").is_some();
         let has_planning_config = tools_config.get("planning").is_some();
+        let has_tasks_config = tools_config.get("tasks").is_some();
         if has_reminders_config {
             for (_, tools) in &mut agent_tools {
                 if !tools.iter().any(|tool| tool == "reminders") {
@@ -407,6 +409,13 @@ impl ButterflyBotFactory {
             for (_, tools) in &mut agent_tools {
                 if !tools.iter().any(|tool| tool == "planning") {
                     tools.push("planning".to_string());
+                }
+            }
+        }
+        if has_tasks_config {
+            for (_, tools) in &mut agent_tools {
+                if !tools.iter().any(|tool| tool == "tasks") {
+                    tools.push("tasks".to_string());
                 }
             }
         }
@@ -455,6 +464,12 @@ impl ButterflyBotFactory {
 
         if enabled_tools.contains("planning") || has_planning_config {
             let tool: Arc<dyn Tool> = Arc::new(PlanningTool::new());
+            tool.configure(&config_value)?;
+            let _ = tool_registry.register_tool(tool).await;
+        }
+
+        if enabled_tools.contains("tasks") || has_tasks_config {
+            let tool: Arc<dyn Tool> = Arc::new(TasksTool::new());
             tool.configure(&config_value)?;
             let _ = tool_registry.register_tool(tool).await;
         }

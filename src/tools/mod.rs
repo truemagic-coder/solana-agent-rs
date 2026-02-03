@@ -5,3 +5,4 @@ pub mod wakeup;
 pub mod http_call;
 pub mod todo;
 pub mod planning;
+pub mod tasks;

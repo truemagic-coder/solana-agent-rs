@@ -73,7 +73,7 @@ Config is stored in `./data/butterfly-bot.db` by default.
 
 ## Tools
 
-### MCP Tool (SSE)
+### MCP Tool
 
 Configure MCP servers in config.json under `tools.mcp.servers` (supports `type`: `sse` or `http`):
 
@@ -169,6 +169,50 @@ Call external APIs with arbitrary HTTP requests and custom headers. Configure de
                 "Authorization": "Bearer YOUR_TOKEN"
             },
             "timeout_seconds": 60
+        }
+    }
+}
+```
+
+### Todo Tool
+
+Ordered todo list backed by SQLite:
+
+```json
+{
+    "tools": {
+        "todo": {
+            "sqlite_path": "./data/butterfly-bot.db"
+        }
+    }
+}
+```
+
+### Planning Tool
+
+Structured plans with goals and steps:
+
+```json
+{
+    "tools": {
+        "planning": {
+            "sqlite_path": "./data/butterfly-bot.db"
+        }
+    }
+}
+```
+
+### Tasks Tool
+
+Schedule one-off or recurring tasks with cancellation support:
+
+```json
+{
+    "tools": {
+        "tasks": {
+            "poll_seconds": 60,
+            "audit_log_path": "./data/tasks_audit.log",
+            "sqlite_path": "./data/butterfly-bot.db"
         }
     }
 }
