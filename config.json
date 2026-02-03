@@ -67,6 +67,7 @@
       "servers": [
         {
           "name": "local",
+          "type": "sse",
           "url": "http://127.0.0.1:3001/sse",
           "headers": {
             "Authorization": "Bearer YOUR_TOKEN"

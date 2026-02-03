@@ -75,7 +75,7 @@ Config is stored in `./data/butterfly-bot.db` by default.
 
 ### MCP Tool (SSE)
 
-Configure MCP servers in config.json under `tools.mcp.servers`:
+Configure MCP servers in config.json under `tools.mcp.servers` (supports `type`: `sse` or `http`):
 
 ```json
 {
@@ -84,9 +84,31 @@ Configure MCP servers in config.json under `tools.mcp.servers`:
             "servers": [
                 {
                     "name": "local",
+                    "type": "sse",
                     "url": "http://127.0.0.1:3001/sse",
                     "headers": {
                         "Authorization": "Bearer my-token"
+                    }
+                }
+            ]
+        }
+    }
+}
+```
+
+HTTP (streamable) example:
+
+```json
+{
+    "tools": {
+        "mcp": {
+            "servers": [
+                {
+                    "name": "github",
+                    "type": "http",
+                    "url": "https://api.githubcopilot.com/mcp/",
+                    "headers": {
+                        "Authorization": "Bearer YOUR_TOKEN"
                     }
                 }
             ]

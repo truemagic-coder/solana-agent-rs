@@ -56,6 +56,7 @@ dioxus = { version = "0.7.3", features = ["desktop"] }
 time = { version = "0.3", features = ["formatting", "macros"] }
 lru = "0.12"
 rust-mcp-sdk = "0.8.3"
+rust-mcp-transport = "0.8.0"
 
 [features]
 default = []

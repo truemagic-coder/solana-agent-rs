@@ -14,12 +14,21 @@ use rust_mcp_sdk::schema::{
 };
 use rust_mcp_sdk::{ClientSseTransport, ClientSseTransportOptions, McpClient};
 use std::sync::Arc;
+use std::time::Duration;
+use rust_mcp_transport::{RequestOptions, StreamableTransportOptions};
 
 #[derive(Clone, Debug)]
 struct McpServerConfig {
     name: String,
+    transport: McpTransport,
     url: String,
     headers: HashMap<String, String>,
+}
+
+#[derive(Clone, Debug)]
+enum McpTransport {
+    Sse,
+    Http,
 }
 
 #[derive(Default)]
@@ -69,6 +78,16 @@ impl McpTool {
                 .unwrap_or_default()
                 .trim()
                 .to_string();
+            let transport = match server
+                .get("type")
+                .and_then(|v| v.as_str())
+                .unwrap_or("sse")
+                .to_lowercase()
+                .as_str()
+            {
+                "http" | "streamable-http" => McpTransport::Http,
+                _ => McpTransport::Sse,
+            };
             if name.is_empty() || url.is_empty() {
                 return Err(ButterflyBotError::Config(
                     "MCP server entry requires name and url".to_string(),
@@ -83,7 +102,12 @@ impl McpTool {
                         .collect::<HashMap<_, _>>()
                 })
                 .unwrap_or_default();
-            parsed.push(McpServerConfig { name, url, headers });
+            parsed.push(McpServerConfig {
+                name,
+                transport,
+                url,
+                headers,
+            });
         }
         Ok(parsed)
     }
@@ -115,7 +139,10 @@ impl McpTool {
         }
     }
 
-    async fn create_client(&self, server: &McpServerConfig) -> Result<Arc<rust_mcp_sdk::mcp_client::ClientRuntime>> {
+    async fn create_client(
+        &self,
+        server: &McpServerConfig,
+    ) -> Result<Arc<rust_mcp_sdk::mcp_client::ClientRuntime>> {
         let client_details = InitializeRequestParams {
             capabilities: ClientCapabilities::default(),
             client_info: Implementation {
@@ -130,33 +157,66 @@ impl McpTool {
             meta: None,
         };
 
-        let transport_options = if server.headers.is_empty() {
-            ClientSseTransportOptions::default()
-        } else {
-            ClientSseTransportOptions {
-                custom_headers: Some(server.headers.clone()),
-                ..ClientSseTransportOptions::default()
+        match server.transport {
+            McpTransport::Sse => {
+                let transport_options = if server.headers.is_empty() {
+                    ClientSseTransportOptions::default()
+                } else {
+                    ClientSseTransportOptions {
+                        custom_headers: Some(server.headers.clone()),
+                        ..ClientSseTransportOptions::default()
+                    }
+                };
+
+                let transport = ClientSseTransport::new(&server.url, transport_options)
+                    .map_err(|e| ButterflyBotError::Runtime(e.to_string()))?;
+
+                let client = client_runtime::create_client(McpClientOptions {
+                    client_details,
+                    transport,
+                    handler: NoopClientHandler.to_mcp_client_handler(),
+                    task_store: None,
+                    server_task_store: None,
+                });
+
+                client
+                    .clone()
+                    .start()
+                    .await
+                    .map_err(|e| ButterflyBotError::Runtime(e.to_string()))?;
+
+                Ok(client)
             }
-        };
-
-        let transport = ClientSseTransport::new(&server.url, transport_options)
-            .map_err(|e| ButterflyBotError::Runtime(e.to_string()))?;
-
-        let client = client_runtime::create_client(McpClientOptions {
-            client_details,
-            transport,
-            handler: NoopClientHandler.to_mcp_client_handler(),
-            task_store: None,
-            server_task_store: None,
-        });
-
-        client
-            .clone()
-            .start()
-            .await
-            .map_err(|e| ButterflyBotError::Runtime(e.to_string()))?;
-
-        Ok(client)
+            McpTransport::Http => {
+                let request_options = RequestOptions {
+                    request_timeout: Duration::from_secs(60),
+                    retry_delay: None,
+                    max_retries: None,
+                    custom_headers: if server.headers.is_empty() {
+                        None
+                    } else {
+                        Some(server.headers.clone())
+                    },
+                };
+                let transport_options = StreamableTransportOptions {
+                    mcp_url: server.url.clone(),
+                    request_options,
+                };
+                let client = rust_mcp_sdk::mcp_client::client_runtime::with_transport_options(
+                    client_details,
+                    transport_options,
+                    NoopClientHandler,
+                    None,
+                    None,
+                );
+                client
+                    .clone()
+                    .start()
+                    .await
+                    .map_err(|e| ButterflyBotError::Runtime(e.to_string()))?;
+                Ok(client)
+            }
+        }
     }
 
     async fn list_tools(&self, server: &McpServerConfig) -> Result<Value> {

@@ -1683,6 +1683,7 @@ dependencies = [
  "regex",
  "reqwest",
  "rust-mcp-sdk",
+ "rust-mcp-transport",
  "serde",
  "serde_json",
  "sha2",
