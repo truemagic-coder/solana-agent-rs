@@ -108,6 +108,10 @@ enum Commands {
         #[arg(long)]
         openai_key: String,
     },
+    DbKeySet {
+        #[arg(long)]
+        key: String,
+    },
     Tools {
         #[command(subcommand)]
         command: ToolsCommand,
@@ -405,6 +409,11 @@ async fn main() -> Result<()> {
             Commands::SecretsSet { openai_key } => {
                 vault::set_secret("openai_api_key", openai_key)?;
                 println!("Secret stored in keyring.");
+                return Ok(());
+            }
+            Commands::DbKeySet { key } => {
+                vault::set_secret("db_encryption_key", key)?;
+                println!("Database key stored in keyring.");
                 return Ok(());
             }
             Commands::Tools { command } => {

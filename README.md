@@ -4,19 +4,19 @@ Butterfly Bot is a desktop app for chatting with your personal AI assistant. It 
 
 ## Highlights
 
-- Modern desktop UI (Dioxus) with streaming chat using Ollama models
+- Modern desktop UI (Dioxus) with streaming chat using local Ollama models
 - Reminders and notifications both in chat and OS notifications
-- Optional long-term memory using embedded local storage of SQLite and LanceDB
+- Optional long-term memory using embedded local storage of SQLCipher and LanceDB
 - Agent tool integrations with live UI events
-- Config and secrets managed from the settings screen
+- Config and secrets managed from the config screen
 
-## Privacy & Security
+## Privacy & Security & Always On
 
-Privacy is a core principle for Butterfly Bot:
-
-- Run locally with Ollama to keep requests and model inference on your machine.
-- Conversation data and memory are stored locally by default.
+- Run locally with Ollama to keep requests and model inference private on your machine.
+- Designed for always-on use with unlimited token use (local inference) and customized wakeup and task intervals.
+- Conversation data and memory are only stored locally.
 - All secrets (API keys) are stored in the OS keychain GNOME Keyring/Secret Service. Secrets are never written in plaintext to config files.
+- SQLite data is encrypted at rest via SQLCipher when a DB key is set.
 
 ## Requirements
 
@@ -60,9 +60,9 @@ Run CLI:
 cargo run --bin butterfly-bot -- --cli
 ```
 
-## Settings
+## Config
 
-Use the Settings tab in the app to configure:
+Use the Config tab in the app to configure:
 
 - Provider credentials
 - Tool enable/disable
@@ -70,6 +70,22 @@ Use the Settings tab in the app to configure:
 - Memory settings
 
 Config is stored in `./data/butterfly-bot.db` by default.
+
+## SQLCipher (encrypted storage)
+
+Butterfly Bot uses SQLCipher-backed SQLite when you provide a DB key. Set it via the CLI or environment:
+
+```bash
+cargo run --bin butterfly-bot -- db-key-set --key "your-strong-passphrase"
+```
+
+Or set the environment variable before running:
+
+```bash
+export BUTTERFLY_BOT_DB_KEY="your-strong-passphrase"
+```
+
+If no key is set, storage falls back to plaintext SQLite.
 
 ## Tools
 

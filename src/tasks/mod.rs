@@ -239,10 +239,13 @@ impl TaskStore {
     }
 
     async fn conn(&self) -> Result<SqlitePooledConn<'_>> {
-        self.pool
+        let mut conn = self
+            .pool
             .get()
             .await
-            .map_err(|e| ButterflyBotError::Runtime(e.to_string()))
+            .map_err(|e| ButterflyBotError::Runtime(e.to_string()))?;
+        crate::db::apply_sqlcipher_key_async(&mut conn).await?;
+        Ok(conn)
     }
 }
 
@@ -273,6 +276,7 @@ async fn run_migrations(database_url: &str) -> Result<()> {
     tokio::task::spawn_blocking(move || {
         let mut conn = SqliteConnection::establish(&database_url)
             .map_err(|e| ButterflyBotError::Runtime(e.to_string()))?;
+        crate::db::apply_sqlcipher_key_sync(&mut conn)?;
         conn.run_pending_migrations(MIGRATIONS)
             .map_err(|e| ButterflyBotError::Runtime(e.to_string()))?;
         Ok::<_, ButterflyBotError>(())

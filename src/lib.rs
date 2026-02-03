@@ -3,6 +3,7 @@ pub mod client;
 pub mod config;
 pub mod config_store;
 pub mod daemon;
+pub mod db;
 pub mod domains;
 pub mod error;
 pub mod factories;
