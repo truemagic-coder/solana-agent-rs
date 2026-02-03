@@ -13,6 +13,7 @@ use axum::{
 use bytes::Bytes;
 use futures::StreamExt;
 use serde::{Deserialize, Serialize};
+use serde_json::{json, Value};
 
 use crate::client::ButterflyBot;
 use crate::config::{AgentConfig, Config, MemoryConfig, OpenAiConfig};
@@ -59,6 +60,8 @@ struct WakeupJob {
     agent: Arc<ButterflyBot>,
     store: Arc<WakeupStore>,
     interval: Duration,
+    ui_event_tx: broadcast::Sender<UiEvent>,
+    audit_log_path: Option<String>,
 }
 
 #[async_trait::async_trait]
@@ -88,10 +91,42 @@ impl ScheduledJob for WakeupJob {
                 router: None,
             };
             let input = format!("Wakeup task '{}': {}", task.name, task.prompt);
-            let _ = self
+            let result = self
                 .agent
                 .process(&task.user_id, UserInput::Text(input), options)
                 .await;
+
+            let (status, payload): (String, Value) = match result {
+                Ok(ProcessResult::Text(text)) => (
+                    "ok".to_string(),
+                    json!({"task_id": task.id, "name": task.name, "output": text}),
+                ),
+                Ok(other) => (
+                    "ok".to_string(),
+                    json!({"task_id": task.id, "name": task.name, "output": format!("{other:?}")}),
+                ),
+                Err(err) => (
+                    "error".to_string(),
+                    json!({"task_id": task.id, "name": task.name, "error": err.to_string()}),
+                ),
+            };
+
+            let event = UiEvent {
+                event_type: "wakeup".to_string(),
+                user_id: task.user_id.clone(),
+                tool: "wakeup".to_string(),
+                status: status.clone(),
+                payload: payload.clone(),
+                timestamp: run_at,
+            };
+            let _ = self.ui_event_tx.send(event);
+            let _ = write_wakeup_audit_log(
+                self.audit_log_path.as_deref(),
+                run_at,
+                &task,
+                status.as_str(),
+                payload.clone(),
+            );
         }
         Ok(())
     }
@@ -486,6 +521,8 @@ where
         agent: agent.clone(),
         store: wakeup_store.clone(),
         interval: Duration::from_secs(wakeup_poll_seconds.max(1)),
+        ui_event_tx: ui_event_tx.clone(),
+        audit_log_path: wakeup_audit_log_path(config.as_ref()),
     }));
     scheduler.start();
 
@@ -519,4 +556,48 @@ fn now_ts() -> i64 {
         .duration_since(UNIX_EPOCH)
         .unwrap_or_default()
         .as_secs() as i64
+}
+
+fn wakeup_audit_log_path(config: Option<&Config>) -> Option<String> {
+    let path = config
+        .and_then(|cfg| cfg.tools.as_ref())
+        .and_then(|tools| tools.get("wakeup"))
+        .and_then(|wakeup| wakeup.get("audit_log_path"))
+        .and_then(|value| value.as_str())
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+        .or_else(|| Some("./data/wakeup_audit.log".to_string()));
+    path
+}
+
+fn write_wakeup_audit_log(
+    path: Option<&str>,
+    ts: i64,
+    task: &crate::wakeup::WakeupTask,
+    status: &str,
+    payload: serde_json::Value,
+) -> Result<()> {
+    let Some(path) = path else {
+        return Ok(());
+    };
+    config_store::ensure_parent_dir(path)?;
+    let mut file = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(path)
+        .map_err(|e| ButterflyBotError::Runtime(e.to_string()))?;
+    let entry = serde_json::json!({
+        "timestamp": ts,
+        "task_id": task.id,
+        "user_id": task.user_id,
+        "name": task.name,
+        "prompt": task.prompt,
+        "status": status,
+        "payload": payload,
+    });
+    let line = serde_json::to_string(&entry)
+        .map_err(|e| ButterflyBotError::Serialization(e.to_string()))?;
+    use std::io::Write;
+    writeln!(file, "{line}").map_err(|e| ButterflyBotError::Runtime(e.to_string()))?;
+    Ok(())
 }

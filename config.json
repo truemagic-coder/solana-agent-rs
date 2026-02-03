@@ -74,7 +74,8 @@
     },
     "wakeup": {
       "poll_seconds": 60,
-      "sqlite_path": "./data/butterfly-bot.db"
+      "sqlite_path": "./data/butterfly-bot.db",
+      "audit_log_path": "./data/wakeup_audit.log"
     },
     "http_call": {
       "base_url": "",

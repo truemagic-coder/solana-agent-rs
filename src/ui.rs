@@ -523,6 +523,15 @@ fn app_view() -> Element {
                                             payload.get("error").and_then(|v| v.as_str())
                                         {
                                             text.push_str(&format!(" — {error}"));
+                                        } else if let Some(output) =
+                                            payload.get("output").and_then(|v| v.as_str())
+                                        {
+                                            let trimmed = if output.len() > 400 {
+                                                format!("{}…", &output[..400])
+                                            } else {
+                                                output.to_string()
+                                            };
+                                            text.push_str(&format!(" — {trimmed}"));
                                         }
                                     }
                                     let id = next_id();

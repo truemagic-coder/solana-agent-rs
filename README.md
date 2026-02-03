@@ -119,17 +119,20 @@ Configure the internet search tool in config.json under `tools.search_internet`:
 
 ### Wakeup Tool
 
-Create recurring agent tasks with `tools.wakeup` and control polling:
+Create recurring agent tasks with `tools.wakeup`, control polling, and log runs to an audit file:
 
 ```json
 {
     "tools": {
         "wakeup": {
-            "poll_seconds": 60
+            "poll_seconds": 60,
+            "audit_log_path": "./data/wakeup_audit.log"
         }
     }
 }
 ```
+
+Wakeup runs are also streamed to the UI event feed as tool messages.
 
 ### HTTP Call Tool
 
