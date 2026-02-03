@@ -16,7 +16,15 @@ use std::env;
 use std::thread;
 use tokio::time::{sleep, timeout, Duration};
 
-const AVAILABLE_TOOLS: [&str; 5] = ["search_internet", "reminders", "mcp", "wakeup", "http_call"];
+const AVAILABLE_TOOLS: [&str; 7] = [
+    "search_internet",
+    "reminders",
+    "mcp",
+    "wakeup",
+    "http_call",
+    "todo",
+    "planning",
+];
 
 #[derive(Clone, Serialize)]
 struct ProcessTextRequest {

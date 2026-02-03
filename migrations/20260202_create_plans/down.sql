@@ -1,0 +1,2 @@
+DROP INDEX IF EXISTS plans_user_idx;
+DROP TABLE IF EXISTS plans;

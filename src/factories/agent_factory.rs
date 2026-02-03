@@ -84,6 +84,8 @@ use crate::tools::mcp::McpTool;
 use crate::tools::reminders::RemindersTool;
 use crate::tools::search_internet::SearchInternetTool;
 use crate::tools::wakeup::WakeupTool;
+use crate::tools::todo::TodoTool;
+use crate::tools::planning::PlanningTool;
 use tokio::sync::broadcast;
 
 pub struct ButterflyBotFactory;
@@ -364,6 +366,8 @@ impl ButterflyBotFactory {
         let has_mcp_config = tools_config.get("mcp").is_some();
         let has_wakeup_config = tools_config.get("wakeup").is_some();
         let has_http_call_config = tools_config.get("http_call").is_some();
+        let has_todo_config = tools_config.get("todo").is_some();
+        let has_planning_config = tools_config.get("planning").is_some();
         if has_reminders_config {
             for (_, tools) in &mut agent_tools {
                 if !tools.iter().any(|tool| tool == "reminders") {
@@ -389,6 +393,20 @@ impl ButterflyBotFactory {
             for (_, tools) in &mut agent_tools {
                 if !tools.iter().any(|tool| tool == "http_call") {
                     tools.push("http_call".to_string());
+                }
+            }
+        }
+        if has_todo_config {
+            for (_, tools) in &mut agent_tools {
+                if !tools.iter().any(|tool| tool == "todo") {
+                    tools.push("todo".to_string());
+                }
+            }
+        }
+        if has_planning_config {
+            for (_, tools) in &mut agent_tools {
+                if !tools.iter().any(|tool| tool == "planning") {
+                    tools.push("planning".to_string());
                 }
             }
         }
@@ -425,6 +443,18 @@ impl ButterflyBotFactory {
 
         if enabled_tools.contains("http_call") || has_http_call_config {
             let tool: Arc<dyn Tool> = Arc::new(HttpCallTool::new());
+            tool.configure(&config_value)?;
+            let _ = tool_registry.register_tool(tool).await;
+        }
+
+        if enabled_tools.contains("todo") || has_todo_config {
+            let tool: Arc<dyn Tool> = Arc::new(TodoTool::new());
+            tool.configure(&config_value)?;
+            let _ = tool_registry.register_tool(tool).await;
+        }
+
+        if enabled_tools.contains("planning") || has_planning_config {
+            let tool: Arc<dyn Tool> = Arc::new(PlanningTool::new());
             tool.configure(&config_value)?;
             let _ = tool_registry.register_tool(tool).await;
         }
