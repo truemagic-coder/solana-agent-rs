@@ -1,40 +1,60 @@
 ## Butterfly Bot
 
-Butterfly Bot is a desktop app for chatting with your personal AI assistant. It includes reminders, memory, tool integrations, and streaming responses in a polished UI. The codebase still exposes a Rust library for building bots, but the primary focus is the app experience.
+`Butterfly Bot` is your personal AI assistant accessible via a native desktop app. It includes memory, tool integrations, easy configuration, and streaming responses in a polished UI. The codebase still exposes a Rust library for building bots, but the primary focus is the app experience.
 
 ## Highlights
 
-- Modern desktop UI (Dioxus) with streaming chat using local Ollama models
-- Reminders and notifications both in chat and OS notifications
-- Optional long-term memory using embedded local storage of SQLCipher and LanceDB
-- Agent tool integrations with live UI events
-- Config and secrets managed from the config screen
+- Modern desktop UI (Dioxus) with streaming chat using local Ollama models or OpenAI compatible providers.
+- Reminders and notifications both in chat and OS notifications.
+- Optional long-term memory (temporal knowledge graph) using embedded local storage of SQLCipher and LanceDB.
+- Agent tool integrations with live UI events.
+- Config and secrets managed from the config screen via JSON and stored in OS keyring.
 
 ## Privacy & Security & Always On
 
 - Run locally with Ollama to keep requests and model inference private on your machine.
 - Designed for always-on use with unlimited token use (local inference) and customized wakeup and task intervals.
 - Conversation data and memory are only stored locally.
-- All secrets (API keys) are stored in the OS keychain GNOME Keyring/Secret Service. Secrets are never written in plaintext to config files.
+- Config JSON is stored in the OS keychain GNOME Keyring/Secret Service.
 - SQLite data is encrypted at rest via SQLCipher when a DB key is set.
 
-## Requirements
+## Ollama
+
+### Requirements
 
 - Rust 1.93 or newer
-- 32GB+ of RAM
+- 32GB+ of RAM 
 - Linux (Ubuntu recommended)
 - Certain system libraries for Linux
 - 24GB+ of VRAM (e.g. AMD 7900XTX or GTX 3090/4090/5090)
 
-## Ollama Models Used
+### Models Used
 
 - ministral-3:14b (agent/router)
 - embeddinggemma:latest (embedding)
 - qllama/bge-reranker-v2-m3 (reranking)
 
-## Supported Platforms/Devices
+### Model Notes
+- Models are required to be pulled manually using `ollama pull` before `butterfly-bot` will work with them.
+- Ollama models can be overriden and other models can be used rather than the default ones.
+- Very beefy Macs like a max speced Mini or Studio could also run the Ollama setup (not tested)
 
-- (instant results) AMD Threadripper 2950X with 128GB DDR4 with AMD 7900XTX on Ubuntu 24.04.3
+### Test System
+
+- AMD Threadripper 2950X with 128GB DDR4 with AMD 7900XTX on Ubuntu 24.04.3
+- Provides instant results for Ollama chatting with memory
+
+## OpenAI 
+
+### Requirements
+
+- Rust 1.93 or newer
+- Certain system libraries for the host OS
+- Mac or Linux or Windows
+
+### Model Recommendations
+
+- No recommendations at this time as no testing of OpenAI has been done
 
 ## Build
 
@@ -42,41 +62,24 @@ Butterfly Bot is a desktop app for chatting with your personal AI assistant. It 
 cargo build --release
 ```
 
-## Run the UI
+## Run
 
 ```bash
 cargo run --release --bin butterfly-bot
 ```
 
-Optional config import on launch:
-
-```bash
-cargo run --release --bin butterfly-bot -- --config config.json
-```
-
-Run CLI:
-
-```bash
-cargo run --bin butterfly-bot -- --cli
-```
-
 ## Config
 
-Use the Config tab in the app to configure:
+Use the Config tab in the app to configure all settings via JSON.
 
-- Provider credentials
-- Tool enable/disable
-- Reminders database path
-- Memory settings
-
-Config is stored in `./data/butterfly-bot.db` by default.
+Config is stored in the OS keyring for top security and safety.
 
 ## SQLCipher (encrypted storage)
 
 Butterfly Bot uses SQLCipher-backed SQLite when you provide a DB key. Set it via the CLI or environment:
 
 ```bash
-cargo run --bin butterfly-bot -- db-key-set --key "your-strong-passphrase"
+cargo run --release --bin butterfly-bot -- db-key-set --key "your-strong-passphrase"
 ```
 
 Or set the environment variable before running:
@@ -91,7 +94,17 @@ If no key is set, storage falls back to plaintext SQLite.
 
 ### MCP Tool
 
-Configure MCP servers in config.json under `tools.mcp.servers` (supports `type`: `sse` or `http`):
+The MCP tool supports both `SSE` or `HTTP` connections, custom headers, and multiple servers at once.
+
+There are many high-quality MCP server providers like: 
+
+* [Zapier](https://zapier.com/mcp) - 7,000+ app connections via MCP
+
+* [VAPI.AI](https://vapi.ai) - Voice Agent Telephony 
+
+* [GitHub](https://github.com) - Coding
+
+Configure MCP servers under `tools.mcp.servers` (supports `type`: `sse` or `http`):
 
 ```json
 {
@@ -135,7 +148,9 @@ HTTP (streamable) example:
 
 ### Internet Search Tool
 
-Configure the internet search tool in config.json under `tools.search_internet`:
+The Internet Search tool supports 3 different providers: `openai`, `grok`, and `perplexity`.
+
+Configure the internet search tool under `tools.search_internet`:
 
 ```json
 {
@@ -157,6 +172,10 @@ Configure the internet search tool in config.json under `tools.search_internet`:
 
 ### Wakeup Tool
 
+The wakeup tool wakes up the agent to perform tasks on an interval - in someother agents it is called a `heartbeat`.
+
+Wakeup runs are also streamed to the UI event feed as tool messages.
+
 Create recurring agent tasks with `tools.wakeup`, control polling, and log runs to an audit file:
 
 ```json
@@ -170,9 +189,11 @@ Create recurring agent tasks with `tools.wakeup`, control polling, and log runs 
 }
 ```
 
-Wakeup runs are also streamed to the UI event feed as tool messages.
-
 ### HTTP Call Tool
+
+HTTP Call tool can call any public endpoint and private endpoint (if base url and authorization is provided).
+
+Endpoints can be discovered by the agent or provided in the system/user prompts.
 
 Call external APIs with arbitrary HTTP requests and custom headers. Configure defaults under `tools.http_call`:
 
@@ -192,7 +213,7 @@ Call external APIs with arbitrary HTTP requests and custom headers. Configure de
 
 ### Todo Tool
 
-Ordered todo list backed by SQLite:
+Ordered todo list backed by SQLite for the agent to created todo lists:
 
 ```json
 {
@@ -206,7 +227,7 @@ Ordered todo list backed by SQLite:
 
 ### Planning Tool
 
-Structured plans with goals and steps:
+Structured plans with goals and steps for the agent to create plans:
 
 ```json
 {
@@ -220,7 +241,7 @@ Structured plans with goals and steps:
 
 ### Tasks Tool
 
-Schedule one-off or recurring tasks with cancellation support:
+Schedule one-off or recurring tasks with cancellation support for the agent to create tasks:
 
 ```json
 {
@@ -228,6 +249,22 @@ Schedule one-off or recurring tasks with cancellation support:
         "tasks": {
             "poll_seconds": 60,
             "audit_log_path": "./data/tasks_audit.log",
+            "sqlite_path": "./data/butterfly-bot.db"
+        }
+    }
+}
+```
+
+### Reminders Tool
+
+The reminders tool is for users to create reminders for themselves or for the agent to create reminders for the user.
+
+Create, list, complete, delete, and snooze reminders. Configure storage under `tools.reminders` (falls back to `memory.sqlite_path` if omitted):
+
+```json
+{
+    "tools": {
+        "reminders": {
             "sqlite_path": "./data/butterfly-bot.db"
         }
     }
