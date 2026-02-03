@@ -79,6 +79,7 @@ use crate::reminders::{default_reminder_db_path, resolve_reminder_db_path, Remin
 use crate::services::agent::{AgentService, UiEvent};
 use crate::services::query::QueryService;
 use crate::services::routing::RoutingService;
+use crate::tools::http_call::HttpCallTool;
 use crate::tools::mcp::McpTool;
 use crate::tools::reminders::RemindersTool;
 use crate::tools::search_internet::SearchInternetTool;
@@ -362,6 +363,7 @@ impl ButterflyBotFactory {
                 .unwrap_or(false);
         let has_mcp_config = tools_config.get("mcp").is_some();
         let has_wakeup_config = tools_config.get("wakeup").is_some();
+        let has_http_call_config = tools_config.get("http_call").is_some();
         if has_reminders_config {
             for (_, tools) in &mut agent_tools {
                 if !tools.iter().any(|tool| tool == "reminders") {
@@ -380,6 +382,13 @@ impl ButterflyBotFactory {
             for (_, tools) in &mut agent_tools {
                 if !tools.iter().any(|tool| tool == "wakeup") {
                     tools.push("wakeup".to_string());
+                }
+            }
+        }
+        if has_http_call_config {
+            for (_, tools) in &mut agent_tools {
+                if !tools.iter().any(|tool| tool == "http_call") {
+                    tools.push("http_call".to_string());
                 }
             }
         }
@@ -410,6 +419,12 @@ impl ButterflyBotFactory {
 
         if enabled_tools.contains("wakeup") || has_wakeup_config {
             let tool: Arc<dyn Tool> = Arc::new(WakeupTool::new());
+            tool.configure(&config_value)?;
+            let _ = tool_registry.register_tool(tool).await;
+        }
+
+        if enabled_tools.contains("http_call") || has_http_call_config {
+            let tool: Arc<dyn Tool> = Arc::new(HttpCallTool::new());
             tool.configure(&config_value)?;
             let _ = tool_registry.register_tool(tool).await;
         }

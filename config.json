@@ -43,7 +43,8 @@
         "search_internet": true,
         "reminders": true,
         "mcp": true,
-        "wakeup": true
+        "wakeup": true,
+        "http_call": true
       }
     },
     "search_internet": {
@@ -74,6 +75,13 @@
     "wakeup": {
       "poll_seconds": 60,
       "sqlite_path": "./data/butterfly-bot.db"
+    },
+    "http_call": {
+      "base_url": "",
+      "default_headers": {
+        "Authorization": "Bearer YOUR_TOKEN"
+      },
+      "timeout_seconds": 60
     }
   },
   "brains": {

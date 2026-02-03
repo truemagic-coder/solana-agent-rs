@@ -131,6 +131,24 @@ Create recurring agent tasks with `tools.wakeup` and control polling:
 }
 ```
 
+### HTTP Call Tool
+
+Call external APIs with arbitrary HTTP requests and custom headers. Configure defaults under `tools.http_call`:
+
+```json
+{
+    "tools": {
+        "http_call": {
+            "base_url": "https://api.example.com",
+            "default_headers": {
+                "Authorization": "Bearer YOUR_TOKEN"
+            },
+            "timeout_seconds": 60
+        }
+    }
+}
+```
+
 ## Library Usage (Minimal)
 
 If you still want to embed Butterfly Bot, the Rust API is available:
