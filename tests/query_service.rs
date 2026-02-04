@@ -9,58 +9,31 @@ use serde_json::json;
 
 use butterfly_bot::brain::manager::BrainManager;
 use butterfly_bot::client::ButterflyBot;
-use butterfly_bot::config::{
-    AgentConfig, BusinessConfig, BusinessValue, Config, GuardrailConfig, GuardrailsConfig,
-    OpenAiConfig,
-};
+use butterfly_bot::config::{Config, OpenAiConfig};
+use butterfly_bot::domains::agent::AIAgent;
 use butterfly_bot::error::ButterflyBotError;
-use butterfly_bot::guardrails::pii::{NoopGuardrail, PiiGuardrail};
 use butterfly_bot::interfaces::providers::{ImageData, ImageInput};
 use butterfly_bot::providers::memory::InMemoryMemoryProvider;
 use butterfly_bot::services::agent::AgentService;
 use butterfly_bot::services::query::{
     OutputFormat, ProcessOptions, ProcessResult, QueryService, UserInput,
 };
-use butterfly_bot::services::routing::RoutingService;
 
-use common::{DummyRouter, DummyTool, FlakyNameTool, QueueLlmProvider};
+use common::{DummyTool, FlakyNameTool, QueueLlmProvider};
 
 #[tokio::test]
 async fn query_service_and_client() {
     let llm = Arc::new(QueueLlmProvider::new(vec![]));
     let brain = Arc::new(BrainManager::new(json!({})));
-    let mut service = AgentService::new(
-        llm.clone(),
-        None,
-        vec![Arc::new(NoopGuardrail)],
-        brain,
-        None,
-    );
-    service.register_ai_agent(
-        "agent".to_string(),
-        "inst".to_string(),
-        "spec".to_string(),
-        None,
-        None,
-    );
-    service.register_ai_agent(
-        "router_agent".to_string(),
-        "inst".to_string(),
-        "spec".to_string(),
-        None,
-        None,
-    );
-    let service = Arc::new(service);
-    let routing = Arc::new(RoutingService::new(service.clone()));
+    let agent = AIAgent {
+        name: "agent".to_string(),
+        instructions: "inst".to_string(),
+        specialization: "spec".to_string(),
+    };
+    let service = Arc::new(AgentService::new(llm.clone(), agent, None, brain, None));
     let memory = Arc::new(InMemoryMemoryProvider::new());
 
-    let query = QueryService::new(
-        service.clone(),
-        routing.clone(),
-        Some(memory),
-        None,
-        vec![Arc::new(PiiGuardrail::new(None))],
-    );
+    let query = QueryService::new(service.clone(), Some(memory), None);
 
     let text = query.process_text("user", "hello", None).await.unwrap();
     assert_eq!(text, "mock text");
@@ -75,7 +48,6 @@ async fn query_service_and_client() {
         output_format: OutputFormat::Text,
         image_detail: "auto".to_string(),
         json_schema: Some(json!({"type":"object"})),
-        router: Some(Arc::new(DummyRouter)),
     };
     let result = query
         .process(
@@ -101,7 +73,6 @@ async fn query_service_and_client() {
         output_format: OutputFormat::Text,
         image_detail: "low".to_string(),
         json_schema: None,
-        router: None,
     };
     let result = query
         .process("user", UserInput::Text("img".to_string()), options)
@@ -121,7 +92,6 @@ async fn query_service_and_client() {
         },
         image_detail: "auto".to_string(),
         json_schema: None,
-        router: None,
     };
     let result = query
         .process("user", UserInput::Text("hi".to_string()), options)
@@ -138,17 +108,13 @@ async fn query_service_and_client() {
 
     let llm = Arc::new(QueueLlmProvider::new(vec![]));
     let brain = Arc::new(BrainManager::new(json!({})));
-    let mut service = AgentService::new(llm, None, vec![], brain, None);
-    service.register_ai_agent(
-        "agent".to_string(),
-        "inst".to_string(),
-        "spec".to_string(),
-        None,
-        None,
-    );
-    let service = Arc::new(service);
-    let routing = Arc::new(RoutingService::new(service.clone()));
-    let query = QueryService::new(service, routing, None, None, vec![]);
+    let agent = AIAgent {
+        name: "agent".to_string(),
+        instructions: "inst".to_string(),
+        specialization: "spec".to_string(),
+    };
+    let service = Arc::new(AgentService::new(llm, agent, None, brain, None));
+    let query = QueryService::new(service, None, None);
     assert_eq!(query.get_user_history("user", 1).await.unwrap().len(), 0);
     query.delete_user_history("user").await.unwrap();
 
@@ -164,7 +130,6 @@ async fn query_service_and_client() {
         output_format: OutputFormat::Text,
         image_detail: "auto".to_string(),
         json_schema: None,
-        router: None,
     };
     let result = query
         .process("user", UserInput::Text("hello".to_string()), options)
@@ -181,48 +146,22 @@ async fn query_service_and_client() {
             model: None,
             base_url: None,
         }),
-        agents: vec![AgentConfig {
-            name: "agent".to_string(),
-            instructions: "inst".to_string(),
-            specialization: "spec".to_string(),
-            description: None,
-            tools: None,
-            capture_name: None,
-            capture_schema: None,
-        }],
-        business: Some(BusinessConfig {
-            mission: Some("m".to_string()),
-            voice: Some("v".to_string()),
-            values: Some(vec![BusinessValue {
-                name: "n".to_string(),
-                description: "d".to_string(),
-            }]),
-            goals: Some(vec!["g".to_string()]),
-        }),
+        skill_file: None,
+        heartbeat_file: None,
         memory: None,
-        guardrails: Some(GuardrailsConfig {
-            input: Some(vec![GuardrailConfig {
-                class: "PII".to_string(),
-                config: None,
-            }]),
-            output: Some(vec![GuardrailConfig {
-                class: "unknown".to_string(),
-                config: None,
-            }]),
-        }),
         tools: None,
         brains: None,
     };
     let agent = ButterflyBot::from_config(config).await.unwrap();
     let tool = Arc::new(DummyTool::new("tool"));
-    let registered = agent.register_tool("agent", tool.clone()).await.unwrap();
+    let registered = agent.register_tool(tool.clone()).await.unwrap();
     assert!(registered);
 
-    let registered = agent.register_tool("agent", tool.clone()).await.unwrap();
+    let registered = agent.register_tool(tool.clone()).await.unwrap();
     assert!(!registered);
 
     let flaky = Arc::new(FlakyNameTool::new());
-    let err = agent.register_tool("agent", flaky).await.unwrap_err();
+    let err = agent.register_tool(flaky).await.unwrap_err();
     assert!(matches!(err, ButterflyBotError::Runtime(_)));
 
     let server = MockServer::start_async().await;
@@ -248,16 +187,8 @@ async fn query_service_and_client() {
         tmp.path(),
         json!({
             "openai": {"api_key":"key","model":"gpt-4o-mini","base_url": server.base_url()},
-            "agents": [{
-                "name":"agent",
-                "instructions":"inst",
-                "specialization":"spec",
-                "description":null,
-                "capture_name":null,
-                "capture_schema":null
-            }],
-            "business": null,
-            "guardrails": null
+            "skill_file": null,
+            "heartbeat_file": null
         })
         .to_string(),
     )

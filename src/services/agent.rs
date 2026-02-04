@@ -1,4 +1,3 @@
-use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -9,10 +8,9 @@ use serde::Serialize;
 use serde_json::json;
 
 use crate::brain::manager::BrainManager;
-use crate::domains::agent::{AIAgent, BusinessMission};
+use crate::domains::agent::AIAgent;
 use crate::error::{ButterflyBotError, Result};
 use crate::interfaces::brain::{BrainContext, BrainEvent};
-use crate::interfaces::guardrails::OutputGuardrail;
 use crate::interfaces::providers::{LlmProvider, ToolCall};
 use crate::plugins::registry::ToolRegistry;
 use tokio::sync::broadcast;
@@ -20,12 +18,11 @@ use tokio::sync::RwLock;
 
 pub struct AgentService {
     llm_provider: Arc<dyn LlmProvider>,
-    business_mission: Option<BusinessMission>,
     pub tool_registry: Arc<ToolRegistry>,
-    agents: Vec<AIAgent>,
-    output_guardrails: Vec<Arc<dyn OutputGuardrail>>,
+    agent: AIAgent,
+    heartbeat_markdown: RwLock<Option<String>>,
     brain_manager: Arc<BrainManager>,
-    started_agents: RwLock<HashSet<String>>,
+    started: RwLock<bool>,
     ui_event_tx: Option<broadcast::Sender<UiEvent>>,
 }
 
@@ -40,23 +37,30 @@ pub struct UiEvent {
 }
 
 impl AgentService {
+    pub fn agent_name(&self) -> &str {
+        &self.agent.name
+    }
     pub fn new(
         llm_provider: Arc<dyn LlmProvider>,
-        business_mission: Option<BusinessMission>,
-        output_guardrails: Vec<Arc<dyn OutputGuardrail>>,
+        agent: AIAgent,
+        heartbeat_markdown: Option<String>,
         brain_manager: Arc<BrainManager>,
         ui_event_tx: Option<broadcast::Sender<UiEvent>>,
     ) -> Self {
         Self {
             llm_provider,
-            business_mission,
             tool_registry: Arc::new(ToolRegistry::new()),
-            agents: Vec::new(),
-            output_guardrails,
+            agent,
+            heartbeat_markdown: RwLock::new(heartbeat_markdown),
             brain_manager,
-            started_agents: RwLock::new(HashSet::new()),
+            started: RwLock::new(false),
             ui_event_tx,
         }
+    }
+
+    pub async fn set_heartbeat_markdown(&self, heartbeat_markdown: Option<String>) {
+        let mut guard = self.heartbeat_markdown.write().await;
+        *guard = heartbeat_markdown;
     }
 
     fn emit_tool_event(&self, user_id: &str, tool: &str, status: &str, payload: serde_json::Value) {
@@ -74,11 +78,12 @@ impl AgentService {
         let _ = sender.send(event);
     }
 
-    async fn ensure_brain_started(&self, agent_name: &str, user_id: &str) -> Result<()> {
-        let mut started = self.started_agents.write().await;
-        if started.insert(agent_name.to_string()) {
+    async fn ensure_brain_started(&self, user_id: &str) -> Result<()> {
+        let mut started = self.started.write().await;
+        if !*started {
+            *started = true;
             let ctx = BrainContext {
-                agent_name: agent_name.to_string(),
+                agent_name: self.agent.name.clone(),
                 user_id: Some(user_id.to_string()),
             };
             self.brain_manager.dispatch(BrainEvent::Start, &ctx).await;
@@ -86,49 +91,15 @@ impl AgentService {
         Ok(())
     }
 
-    pub fn register_ai_agent(
-        &mut self,
-        name: String,
-        instructions: String,
-        specialization: String,
-        capture_name: Option<String>,
-        capture_schema: Option<serde_json::Value>,
-    ) {
-        self.agents.push(AIAgent {
-            name,
-            instructions,
-            specialization,
-            capture_name,
-            capture_schema,
-        });
-    }
-
-    pub fn get_all_ai_agents(&self) -> HashMap<String, AIAgent> {
-        self.agents
-            .iter()
-            .cloned()
-            .map(|agent| (agent.name.clone(), agent))
-            .collect()
-    }
-
     pub async fn dispatch_brain_tick(&self) {
-        let agents = self.agents.clone();
-        for agent in agents {
-            let ctx = BrainContext {
-                agent_name: agent.name.clone(),
-                user_id: None,
-            };
-            self.brain_manager.dispatch(BrainEvent::Tick, &ctx).await;
-        }
+        let ctx = BrainContext {
+            agent_name: self.agent.name.clone(),
+            user_id: None,
+        };
+        self.brain_manager.dispatch(BrainEvent::Tick, &ctx).await;
     }
 
-    pub fn get_agent_system_prompt(&self, agent_name: &str) -> Result<String> {
-        let agent = self
-            .agents
-            .iter()
-            .find(|a| a.name == agent_name)
-            .ok_or_else(|| ButterflyBotError::Runtime("Agent not found".to_string()))?;
-
+    pub async fn get_agent_system_prompt(&self) -> Result<String> {
         let now = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .map_err(|e| ButterflyBotError::Runtime(e.to_string()))?
@@ -136,28 +107,14 @@ impl AgentService {
 
         let mut system_prompt = format!(
             "You are {}, an AI assistant with the following instructions:\n\n{}\n\nCurrent time (unix seconds): {}",
-            agent.name, agent.instructions, now
+            self.agent.name, self.agent.instructions, now
         );
 
-        if let Some(mission) = &self.business_mission {
-            if let Some(m) = &mission.mission {
-                system_prompt.push_str(&format!("\n\nBUSINESS MISSION:\n{}", m));
-            }
-            if let Some(v) = &mission.voice {
-                system_prompt.push_str(&format!("\n\nVOICE OF THE BRAND:\n{}", v));
-            }
-            if !mission.values.is_empty() {
-                let values_text = mission
-                    .values
-                    .iter()
-                    .map(|(name, description)| format!("- {}: {}", name, description))
-                    .collect::<Vec<_>>()
-                    .join("\n");
-                system_prompt.push_str(&format!("\n\nBUSINESS VALUES:\n{}", values_text));
-            }
-            if !mission.goals.is_empty() {
-                let goals_text = mission.goals.join("\n- ");
-                system_prompt.push_str(&format!("\n\nBUSINESS GOALS:\n- {}", goals_text));
+        let heartbeat_guard = self.heartbeat_markdown.read().await;
+        if let Some(heartbeat) = &*heartbeat_guard {
+            if !heartbeat.trim().is_empty() {
+                system_prompt.push_str("\n\nHEARTBEAT (markdown):\n");
+                system_prompt.push_str(heartbeat);
             }
         }
 
@@ -166,15 +123,14 @@ impl AgentService {
 
     pub async fn generate_response(
         &self,
-        agent_name: &str,
         user_id: &str,
         query: &str,
         memory_context: &str,
         prompt_override: Option<&str>,
     ) -> Result<String> {
-        self.ensure_brain_started(agent_name, user_id).await?;
+        self.ensure_brain_started(user_id).await?;
         let ctx = BrainContext {
-            agent_name: agent_name.to_string(),
+            agent_name: self.agent.name.clone(),
             user_id: Some(user_id.to_string()),
         };
         self.brain_manager
@@ -188,7 +144,7 @@ impl AgentService {
             .await;
 
         let processed_output = self
-            .generate_response_inner(agent_name, user_id, query, memory_context, prompt_override)
+            .generate_response_inner(user_id, query, memory_context, prompt_override)
             .await?;
 
         self.brain_manager
@@ -206,13 +162,12 @@ impl AgentService {
 
     async fn generate_response_inner(
         &self,
-        agent_name: &str,
         user_id: &str,
         query: &str,
         memory_context: &str,
         prompt_override: Option<&str>,
     ) -> Result<String> {
-        let system_prompt = self.get_agent_system_prompt(agent_name)?;
+        let system_prompt = self.get_agent_system_prompt().await?;
         let mut full_prompt = String::new();
         if !memory_context.is_empty() {
             full_prompt.push_str(
@@ -233,7 +188,7 @@ impl AgentService {
         full_prompt.push_str(query);
         full_prompt.push_str(&format!("\n\nUSER IDENTIFIER: {}", user_id));
 
-        let tools = self.tool_registry.get_agent_tools(agent_name).await;
+        let tools = self.tool_registry.get_agent_tools(&self.agent.name).await;
         let output = if tools.is_empty() {
             self.llm_provider
                 .generate_text(&full_prompt, &system_prompt, None)
@@ -242,27 +197,20 @@ impl AgentService {
             self.run_tool_loop(&system_prompt, &full_prompt, tools, user_id)
                 .await?
         };
-
-        let mut processed_output = output;
-        for guardrail in &self.output_guardrails {
-            processed_output = guardrail.process(&processed_output).await?;
-        }
-
-        Ok(processed_output)
+        Ok(output)
     }
 
     pub fn generate_response_stream<'a>(
         &'a self,
-        agent_name: &'a str,
         user_id: &'a str,
         query: &'a str,
         memory_context: &'a str,
         prompt_override: Option<&'a str>,
     ) -> BoxStream<'a, Result<String>> {
         Box::pin(try_stream! {
-            self.ensure_brain_started(agent_name, user_id).await?;
+            self.ensure_brain_started(user_id).await?;
             let ctx = BrainContext {
-                agent_name: agent_name.to_string(),
+                agent_name: self.agent.name.clone(),
                 user_id: Some(user_id.to_string()),
             };
             self.brain_manager
@@ -275,7 +223,7 @@ impl AgentService {
                 )
                 .await;
 
-            let system_prompt = self.get_agent_system_prompt(agent_name)?;
+            let system_prompt = self.get_agent_system_prompt().await?;
             let mut full_prompt = String::new();
             if !memory_context.is_empty() {
                 full_prompt.push_str(
@@ -310,13 +258,9 @@ impl AgentService {
                     Err(ButterflyBotError::Runtime(error))?;
                 }
                 if let Some(delta) = event.delta {
-                    let mut processed = delta;
-                    for guardrail in &self.output_guardrails {
-                        processed = guardrail.process(&processed).await?;
-                    }
-                    if !processed.is_empty() {
-                        response_text.push_str(&processed);
-                        yield processed;
+                    if !delta.is_empty() {
+                        response_text.push_str(&delta);
+                        yield delta;
                     }
                 }
             }
@@ -338,7 +282,6 @@ impl AgentService {
     #[allow(clippy::too_many_arguments)]
     pub async fn generate_response_with_images(
         &self,
-        agent_name: &str,
         user_id: &str,
         query: &str,
         images: Vec<crate::interfaces::providers::ImageInput>,
@@ -346,7 +289,7 @@ impl AgentService {
         prompt_override: Option<&str>,
         detail: &str,
     ) -> Result<String> {
-        let system_prompt = self.get_agent_system_prompt(agent_name)?;
+        let system_prompt = self.get_agent_system_prompt().await?;
         let mut full_prompt = String::new();
         if !memory_context.is_empty() {
             full_prompt.push_str(
@@ -371,24 +314,18 @@ impl AgentService {
             .llm_provider
             .generate_text_with_images(&full_prompt, images, &system_prompt, detail, None)
             .await?;
-
-        let mut processed_output = output;
-        for guardrail in &self.output_guardrails {
-            processed_output = guardrail.process(&processed_output).await?;
-        }
-        Ok(processed_output)
+        Ok(output)
     }
 
     pub async fn generate_structured_response(
         &self,
-        agent_name: &str,
         user_id: &str,
         query: &str,
         memory_context: &str,
         prompt_override: Option<&str>,
         json_schema: serde_json::Value,
     ) -> Result<serde_json::Value> {
-        let system_prompt = self.get_agent_system_prompt(agent_name)?;
+        let system_prompt = self.get_agent_system_prompt().await?;
         let mut full_prompt = String::new();
         if !memory_context.is_empty() {
             full_prompt.push_str(

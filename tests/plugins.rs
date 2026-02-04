@@ -68,37 +68,6 @@ async fn tool_registry_and_plugin_manager() {
 }
 
 #[tokio::test]
-async fn tool_registry_enable_disable_and_safe_mode() {
-    let registry = ToolRegistry::new();
-    let tool = Arc::new(DummyTool::new("tool"));
-    assert!(registry.register_tool(tool).await);
-    assert!(registry.is_tool_enabled("tool").await);
-
-    assert!(registry.disable_tool("tool").await);
-    assert!(!registry.is_tool_enabled("tool").await);
-    assert!(!registry.assign_tool_to_agent("agent", "tool").await);
-
-    assert!(registry.enable_tool("tool").await);
-    assert!(registry.assign_tool_to_agent("agent", "tool").await);
-
-    registry
-        .configure_all_tools(json!({
-            "tools": {"settings": {"safe_mode": true, "enabled": []}}
-        }))
-        .await
-        .unwrap();
-    assert!(!registry.is_tool_enabled("tool").await);
-
-    registry
-        .configure_all_tools(json!({
-            "tools": {"settings": {"safe_mode": true, "enabled": ["tool"]}}
-        }))
-        .await
-        .unwrap();
-    assert!(registry.is_tool_enabled("tool").await);
-}
-
-#[tokio::test]
 async fn tool_registry_audit_log() {
     let dir = tempdir().unwrap();
     let path = dir.path().join("audit.log");

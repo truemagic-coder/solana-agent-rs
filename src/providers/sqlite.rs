@@ -16,14 +16,14 @@ use diesel_async::RunQueryDsl;
 use diesel_migrations::{embed_migrations, EmbeddedMigrations, MigrationHarness};
 use futures::TryStreamExt;
 use lru::LruCache;
-use serde_json::{json, Value};
+use serde_json::json;
 use time::{macros::format_description, OffsetDateTime};
 
 use crate::error::{ButterflyBotError, Result};
 use crate::interfaces::providers::{LlmProvider, MemoryProvider};
 
 mod schema;
-use schema::{captures, messages};
+use schema::messages;
 
 const MIGRATIONS: EmbeddedMigrations = embed_migrations!();
 
@@ -64,17 +64,6 @@ struct NewMessage<'a> {
     user_id: &'a str,
     role: &'a str,
     content: &'a str,
-    timestamp: i64,
-}
-
-#[derive(Insertable)]
-#[diesel(table_name = captures)]
-struct NewCapture<'a> {
-    user_id: &'a str,
-    capture_name: &'a str,
-    agent_name: Option<&'a str>,
-    data: &'a str,
-    schema: Option<&'a str>,
     timestamp: i64,
 }
 
@@ -473,46 +462,6 @@ impl MemoryProvider for SqliteMemoryProvider {
         Ok(())
     }
 
-    async fn save_capture(
-        &self,
-        user_id: &str,
-        capture_name: &str,
-        agent_name: Option<&str>,
-        data: Value,
-        schema: Option<Value>,
-    ) -> Result<Option<String>> {
-        let ts = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .map_err(|e| ButterflyBotError::Runtime(e.to_string()))?
-            .as_secs() as i64;
-        let data =
-            serde_json::to_string(&data).map_err(|e| ButterflyBotError::Runtime(e.to_string()))?;
-        let schema = match schema {
-            Some(value) => Some(
-                serde_json::to_string(&value)
-                    .map_err(|e| ButterflyBotError::Runtime(e.to_string()))?,
-            ),
-            None => None,
-        };
-
-        let new_capture = NewCapture {
-            user_id,
-            capture_name,
-            agent_name,
-            data: &data,
-            schema: schema.as_deref(),
-            timestamp: ts,
-        };
-
-        let mut conn = self.conn().await?;
-        diesel::insert_into(captures::table)
-            .values(&new_capture)
-            .execute(&mut conn)
-            .await
-            .map_err(|e| ButterflyBotError::Runtime(e.to_string()))?;
-        Ok(None)
-    }
-
     async fn search(&self, user_id: &str, query: &str, limit: usize) -> Result<Vec<String>> {
         let mut fts_results = self.search_fts(user_id, query, limit).await?;
         if fts_results.len() >= limit.max(1) {
@@ -710,7 +659,16 @@ impl SqliteMemoryProvider {
         }
     }
 
+    pub async fn summarize_now(&self, user_id: &str) -> Result<()> {
+        self.summarize_with_threshold(user_id, 1).await
+    }
+
     async fn maybe_summarize(&self, user_id: &str) -> Result<()> {
+        self.summarize_with_threshold(user_id, self.summary_threshold)
+            .await
+    }
+
+    async fn summarize_with_threshold(&self, user_id: &str, threshold: usize) -> Result<()> {
         let Some(summarizer) = &self.summarizer else {
             return Ok(());
         };
@@ -721,14 +679,14 @@ impl SqliteMemoryProvider {
                 .get_result(&mut conn)
                 .await
                 .map_err(|e| ButterflyBotError::Runtime(e.to_string()))?;
-        if count.count < self.summary_threshold as i64 {
+        if count.count < threshold as i64 {
             return Ok(());
         }
 
         let rows: Vec<MessageRow> = messages::table
             .filter(messages::user_id.eq(user_id))
             .order(messages::timestamp.desc())
-            .limit(self.summary_threshold as i64)
+            .limit(threshold as i64)
             .select((messages::role, messages::content, messages::timestamp))
             .load(&mut conn)
             .await

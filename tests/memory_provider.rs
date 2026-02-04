@@ -88,34 +88,6 @@ async fn memory_provider_defaults_and_in_memory() {
     assert!(lines.next().unwrap_or_default().ends_with("assistant: b"));
     provider.delete("u2").await.unwrap();
 
-    provider
-        .save_capture(
-            "u3",
-            "cap",
-            Some("agent"),
-            json!({"x":1}),
-            Some(json!({"type":"object"})),
-        )
-        .await
-        .unwrap();
-    provider
-        .save_capture("u3", "cap", None, json!({"x":2}), None)
-        .await
-        .unwrap();
-    provider.insert_document("captures", json!("not-an-object"));
-    let captures = provider
-        .find("captures", json!(null), None, None, None)
-        .unwrap();
-    assert_eq!(captures.len(), 3);
-    let filtered = provider
-        .find("captures", json!({"user_id":"u3"}), None, None, None)
-        .unwrap();
-    assert_eq!(filtered.len(), 2);
-    assert_eq!(
-        provider.count_documents("captures", json!(null)).unwrap(),
-        3
-    );
-
     let dummy = DummyMemoryProvider::new();
     dummy
         .store("u4", vec![json!({"role":"user","content":"x"})])
@@ -131,9 +103,4 @@ async fn memory_provider_defaults_and_in_memory() {
         0
     );
     assert_eq!(dummy.count_documents("any", json!(null)).unwrap(), 0);
-    assert!(dummy
-        .save_capture("u", "cap", None, json!({}), None)
-        .await
-        .unwrap()
-        .is_none());
 }

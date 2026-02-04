@@ -19,18 +19,8 @@ use syntect::parsing::SyntaxSet;
 use syntect::util::LinesWithEndings;
 use std::env;
 use std::thread;
+use tokio::fs;
 use tokio::time::{sleep, timeout, Duration};
-
-const AVAILABLE_TOOLS: [&str; 8] = [
-    "search_internet",
-    "reminders",
-    "mcp",
-    "wakeup",
-    "http_call",
-    "todo",
-    "planning",
-    "tasks",
-];
 
 #[derive(Clone, Serialize)]
 struct ProcessTextRequest {
@@ -52,17 +42,36 @@ enum MessageRole {
     Bot,
 }
 
-#[derive(Clone)]
-#[allow(dead_code)]
-struct ToolToggle {
-    name: String,
-    enabled: bool,
-}
-
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum UiTab {
     Chat,
     Config,
+    Skill,
+    Heartbeat,
+}
+
+fn is_url_source(value: &str) -> bool {
+    let trimmed = value.trim();
+    trimmed.starts_with("http://") || trimmed.starts_with("https://")
+}
+
+async fn load_markdown_source(source: &str) -> Result<String, String> {
+    let trimmed = source.trim();
+    if trimmed.is_empty() {
+        return Ok(String::new());
+    }
+    if is_url_source(trimmed) {
+        let response = reqwest::get(trimmed)
+            .await
+            .map_err(|err| err.to_string())?;
+        if !response.status().is_success() {
+            return Err(format!("Failed to fetch {trimmed}"));
+        }
+        return response.text().await.map_err(|err| err.to_string());
+    }
+    fs::read_to_string(trimmed)
+        .await
+        .map_err(|err| err.to_string())
 }
 
 fn markdown_to_html(input: &str) -> String {
@@ -182,11 +191,17 @@ fn app_view() -> Element {
     let ui_events_listening = use_signal(|| false);
 
     let tools_loaded = use_signal(|| false);
-    let tool_toggles = use_signal(Vec::<ToolToggle>::new);
-    let tools_safe_mode = use_signal(|| false);
     let settings_error = use_signal(String::new);
     let settings_status = use_signal(String::new);
     let config_json_text = use_signal(String::new);
+    let skill_text = use_signal(String::new);
+    let skill_path = use_signal(|| "./skill.md".to_string());
+    let skill_status = use_signal(String::new);
+    let skill_error = use_signal(String::new);
+    let heartbeat_text = use_signal(String::new);
+    let heartbeat_path = use_signal(|| "./heartbeat.md".to_string());
+    let heartbeat_status = use_signal(String::new);
+    let heartbeat_error = use_signal(String::new);
 
     let search_provider = use_signal(|| "openai".to_string());
     let search_model = use_signal(String::new);
@@ -597,8 +612,6 @@ fn app_view() -> Element {
     }
 
     if !*tools_loaded.read() {
-        let tool_toggles = tool_toggles.clone();
-        let tools_safe_mode = tools_safe_mode.clone();
         let settings_error = settings_error.clone();
         let tools_loaded = tools_loaded.clone();
         let settings_status = settings_status.clone();
@@ -614,11 +627,15 @@ fn app_view() -> Element {
         let search_api_key_status = search_api_key_status.clone();
         let reminders_sqlite_path = reminders_sqlite_path.clone();
         let memory_enabled = memory_enabled.clone();
+        let skill_text = skill_text.clone();
+        let skill_path = skill_path.clone();
+        let skill_error = skill_error.clone();
+        let heartbeat_text = heartbeat_text.clone();
+        let heartbeat_path = heartbeat_path.clone();
+        let heartbeat_error = heartbeat_error.clone();
         let db_path = db_path.clone();
 
         spawn(async move {
-            let mut tool_toggles = tool_toggles;
-            let mut tools_safe_mode = tools_safe_mode;
             let mut settings_error = settings_error;
             let mut tools_loaded = tools_loaded;
             let mut settings_status = settings_status;
@@ -634,6 +651,12 @@ fn app_view() -> Element {
             let mut search_api_key_status = search_api_key_status;
             let mut reminders_sqlite_path = reminders_sqlite_path;
             let mut memory_enabled = memory_enabled;
+            let mut skill_text = skill_text;
+            let mut skill_path = skill_path;
+            let mut skill_error = skill_error;
+            let mut heartbeat_text = heartbeat_text;
+            let mut heartbeat_path = heartbeat_path;
+            let mut heartbeat_error = heartbeat_error;
 
             let config = match crate::config::Config::from_store(&db_path) {
                 Ok(value) => value,
@@ -659,74 +682,25 @@ fn app_view() -> Element {
                 }
             }
 
-            let mut tool_names: Vec<String> = AVAILABLE_TOOLS
-                .iter()
-                .map(|name| name.to_string())
-                .collect();
-            for agent in &config.agents {
-                if let Some(tools) = &agent.tools {
-                    for tool in tools {
-                        if !tool_names.contains(tool) {
-                            tool_names.push(tool.to_string());
-                        }
-                    }
-                }
-            }
-
-            let mut enabled_list: Vec<String> = Vec::new();
-            let mut disabled_list: Vec<String> = Vec::new();
-            let mut safe_mode = false;
             let mut allowlist: Vec<String> = Vec::new();
             let mut default_deny = false;
 
             if let Some(tools_value) = &config.tools {
                 if let Value::Object(map) = tools_value {
-                    for (key, value) in map {
-                        if key == "settings" {
-                            if let Some(settings) = value.as_object() {
-                                safe_mode = settings
-                                    .get("safe_mode")
-                                    .and_then(|v| v.as_bool())
-                                    .unwrap_or(false);
-                                enabled_list = settings
-                                    .get("enabled")
-                                    .and_then(|v| v.as_array())
-                                    .map(|items| {
-                                        items
-                                            .iter()
-                                            .filter_map(|v| v.as_str().map(|s| s.to_string()))
-                                            .collect()
-                                    })
-                                    .unwrap_or_default();
-                                disabled_list = settings
-                                    .get("disabled")
-                                    .and_then(|v| v.as_array())
-                                    .map(|items| {
-                                        items
-                                            .iter()
-                                            .filter_map(|v| v.as_str().map(|s| s.to_string()))
-                                            .collect()
-                                    })
-                                    .unwrap_or_default();
-                                if let Some(perms) = settings.get("permissions") {
-                                    if let Some(items) =
-                                        perms.get("network_allow").and_then(|v| v.as_array())
-                                    {
-                                        allowlist = items
-                                            .iter()
-                                            .filter_map(|v| v.as_str().map(|s| s.to_string()))
-                                            .collect();
-                                    }
-                                    if let Some(value) =
-                                        perms.get("default_deny").and_then(|v| v.as_bool())
-                                    {
-                                        default_deny = value;
-                                    }
-                                }
+                    if let Some(settings) = map.get("settings").and_then(|v| v.as_object()) {
+                        if let Some(perms) = settings.get("permissions") {
+                            if let Some(items) =
+                                perms.get("network_allow").and_then(|v| v.as_array())
+                            {
+                                allowlist = items
+                                    .iter()
+                                    .filter_map(|v| v.as_str().map(|s| s.to_string()))
+                                    .collect();
                             }
-                        } else {
-                            if !tool_names.contains(key) {
-                                tool_names.push(key.to_string());
+                            if let Some(value) =
+                                perms.get("default_deny").and_then(|v| v.as_bool())
+                            {
+                                default_deny = value;
                             }
                         }
                     }
@@ -783,6 +757,26 @@ fn app_view() -> Element {
                 }
             }
 
+            let skill_source = config
+                .skill_file
+                .clone()
+                .unwrap_or_else(|| "./skill.md".to_string());
+            skill_path.set(skill_source.clone());
+            match load_markdown_source(&skill_source).await {
+                Ok(text) => skill_text.set(text),
+                Err(err) => skill_error.set(format!("Skill file error: {err}")),
+            }
+
+            let heartbeat_source = config
+                .heartbeat_file
+                .clone()
+                .unwrap_or_else(|| "./heartbeat.md".to_string());
+            heartbeat_path.set(heartbeat_source.clone());
+            match load_markdown_source(&heartbeat_source).await {
+                Ok(text) => heartbeat_text.set(text),
+                Err(err) => heartbeat_error.set(format!("Heartbeat error: {err}")),
+            }
+
             search_default_deny.set(default_deny);
             if !allowlist.is_empty() {
                 search_network_allow.set(allowlist.join(", "));
@@ -806,26 +800,6 @@ fn app_view() -> Element {
                 }
             }
 
-            tool_names.sort();
-            let enabled_set: std::collections::HashSet<String> = enabled_list.into_iter().collect();
-            let disabled_set: std::collections::HashSet<String> =
-                disabled_list.into_iter().collect();
-            let mut toggles = Vec::new();
-            for name in tool_names {
-                let enabled = if safe_mode && enabled_set.is_empty() {
-                    false
-                } else if !enabled_set.is_empty() {
-                    enabled_set.contains(&name)
-                } else if !disabled_set.is_empty() {
-                    !disabled_set.contains(&name)
-                } else {
-                    true
-                };
-                toggles.push(ToolToggle { name, enabled });
-            }
-
-            tools_safe_mode.set(safe_mode);
-            tool_toggles.set(toggles);
             tools_loaded.set(true);
         });
     }
@@ -987,8 +961,191 @@ fn app_view() -> Element {
         })
     };
 
+    let on_validate_skill = {
+        let skill_text = skill_text.clone();
+        let skill_path = skill_path.clone();
+        let skill_status = skill_status.clone();
+        let skill_error = skill_error.clone();
+
+        use_callback(move |_| {
+            let skill_text = skill_text.clone();
+            let skill_path = skill_path.clone();
+            let skill_status = skill_status.clone();
+            let skill_error = skill_error.clone();
+
+            spawn(async move {
+                let mut skill_status = skill_status;
+                let mut skill_error = skill_error;
+
+                skill_status.set(String::new());
+                skill_error.set(String::new());
+
+                let source = skill_path();
+                if source.trim().is_empty() {
+                    skill_error.set("Skill file path is empty.".to_string());
+                    return;
+                }
+
+                if is_url_source(&source) {
+                    match load_markdown_source(&source).await {
+                        Ok(text) if !text.trim().is_empty() => {
+                            skill_status.set("Skill URL is reachable.".to_string())
+                        }
+                        Ok(_) => skill_error.set("Skill URL returned empty content.".to_string()),
+                        Err(err) => skill_error.set(format!("Skill URL error: {err}")),
+                    }
+                    return;
+                }
+
+                let content = skill_text();
+                if content.trim().is_empty() {
+                    skill_error.set("Skill markdown is empty.".to_string());
+                    return;
+                }
+                skill_status.set("Skill markdown looks valid.".to_string());
+            });
+        })
+    };
+
+    let on_save_skill = {
+        let skill_text = skill_text.clone();
+        let skill_path = skill_path.clone();
+        let skill_status = skill_status.clone();
+        let skill_error = skill_error.clone();
+
+        use_callback(move |_| {
+            let skill_text = skill_text.clone();
+            let skill_path = skill_path.clone();
+            let skill_status = skill_status.clone();
+            let skill_error = skill_error.clone();
+
+            spawn(async move {
+                let mut skill_status = skill_status;
+                let mut skill_error = skill_error;
+
+                skill_status.set(String::new());
+                skill_error.set(String::new());
+
+                let source = skill_path();
+                if source.trim().is_empty() {
+                    skill_error.set("Skill file path is empty.".to_string());
+                    return;
+                }
+                if is_url_source(&source) {
+                    skill_error.set("Skill source is a URL and cannot be saved here.".to_string());
+                    return;
+                }
+
+                let content = skill_text();
+                if content.trim().is_empty() {
+                    skill_error.set("Skill markdown is empty.".to_string());
+                    return;
+                }
+
+                if let Err(err) = fs::write(&source, content).await {
+                    skill_error.set(format!("Failed to save skill file: {err}"));
+                    return;
+                }
+                skill_status.set("Skill file saved.".to_string());
+            });
+        })
+    };
+
+    let on_validate_heartbeat = {
+        let heartbeat_text = heartbeat_text.clone();
+        let heartbeat_path = heartbeat_path.clone();
+        let heartbeat_status = heartbeat_status.clone();
+        let heartbeat_error = heartbeat_error.clone();
+
+        use_callback(move |_| {
+            let heartbeat_text = heartbeat_text.clone();
+            let heartbeat_path = heartbeat_path.clone();
+            let heartbeat_status = heartbeat_status.clone();
+            let heartbeat_error = heartbeat_error.clone();
+
+            spawn(async move {
+                let mut heartbeat_status = heartbeat_status;
+                let mut heartbeat_error = heartbeat_error;
+
+                heartbeat_status.set(String::new());
+                heartbeat_error.set(String::new());
+
+                let source = heartbeat_path();
+                if source.trim().is_empty() {
+                    heartbeat_error.set("Heartbeat path or URL is empty.".to_string());
+                    return;
+                }
+
+                if is_url_source(&source) {
+                    match load_markdown_source(&source).await {
+                        Ok(text) if !text.trim().is_empty() => {
+                            heartbeat_status.set("Heartbeat URL is reachable.".to_string())
+                        }
+                        Ok(_) => heartbeat_error.set("Heartbeat URL returned empty content.".to_string()),
+                        Err(err) => heartbeat_error.set(format!("Heartbeat URL error: {err}")),
+                    }
+                    return;
+                }
+
+                let content = heartbeat_text();
+                if content.trim().is_empty() {
+                    heartbeat_error.set("Heartbeat markdown is empty.".to_string());
+                    return;
+                }
+                heartbeat_status.set("Heartbeat markdown looks valid.".to_string());
+            });
+        })
+    };
+
+    let on_save_heartbeat = {
+        let heartbeat_text = heartbeat_text.clone();
+        let heartbeat_path = heartbeat_path.clone();
+        let heartbeat_status = heartbeat_status.clone();
+        let heartbeat_error = heartbeat_error.clone();
+
+        use_callback(move |_| {
+            let heartbeat_text = heartbeat_text.clone();
+            let heartbeat_path = heartbeat_path.clone();
+            let heartbeat_status = heartbeat_status.clone();
+            let heartbeat_error = heartbeat_error.clone();
+
+            spawn(async move {
+                let mut heartbeat_status = heartbeat_status;
+                let mut heartbeat_error = heartbeat_error;
+
+                heartbeat_status.set(String::new());
+                heartbeat_error.set(String::new());
+
+                let source = heartbeat_path();
+                if source.trim().is_empty() {
+                    heartbeat_error.set("Heartbeat path or URL is empty.".to_string());
+                    return;
+                }
+                if is_url_source(&source) {
+                    heartbeat_error
+                        .set("Heartbeat source is a URL and cannot be saved here.".to_string());
+                    return;
+                }
+
+                let content = heartbeat_text();
+                if content.trim().is_empty() {
+                    heartbeat_error.set("Heartbeat markdown is empty.".to_string());
+                    return;
+                }
+
+                if let Err(err) = fs::write(&source, content).await {
+                    heartbeat_error.set(format!("Failed to save heartbeat file: {err}"));
+                    return;
+                }
+                heartbeat_status.set("Heartbeat file saved.".to_string());
+            });
+        })
+    };
+
     let active_tab_chat = active_tab.clone();
     let active_tab_config = active_tab.clone();
+    let active_tab_skill = active_tab.clone();
+    let active_tab_heartbeat = active_tab.clone();
     let prompt_input = prompt.clone();
     let message_input = input.clone();
 
@@ -1200,6 +1357,22 @@ fn app_view() -> Element {
                         },
                         "Config"
                     }
+                    button {
+                        class: if *active_tab.read() == UiTab::Skill { "active" } else { "" },
+                        onclick: move |_| {
+                            let mut active_tab_skill = active_tab_skill.clone();
+                            active_tab_skill.set(UiTab::Skill);
+                        },
+                        "Skill"
+                    }
+                    button {
+                        class: if *active_tab.read() == UiTab::Heartbeat { "active" } else { "" },
+                        onclick: move |_| {
+                            let mut active_tab_heartbeat = active_tab_heartbeat.clone();
+                            active_tab_heartbeat.set(UiTab::Heartbeat);
+                        },
+                        "Heartbeat"
+                    }
                 }
             }
             if !error.read().is_empty() {
@@ -1307,6 +1480,104 @@ fn app_view() -> Element {
                         if !settings_status.read().is_empty() {
                             div { class: "status", "{settings_status}" }
                         }
+                    }
+                }
+            }
+            if *active_tab.read() == UiTab::Skill {
+                div { class: "settings",
+                    div { class: "settings-card",
+                        label { "Skill (Markdown)" }
+                        p { class: "hint", "Source: {skill_path}" }
+                        div { class: "config-head",
+                            label { "Editor" }
+                            label { "Preview" }
+                        }
+                        div { class: "config-grid",
+                            div { class: "config-panel",
+                                textarea {
+                                    id: "skill-md",
+                                    value: "{skill_text}",
+                                    rows: "18",
+                                    class: "config-editor",
+                                    oninput: move |evt| {
+                                        let mut skill_text = skill_text.clone();
+                                        skill_text.set(evt.value());
+                                    },
+                                }
+                            }
+                            div { class: "config-panel",
+                                div {
+                                    class: "config-preview",
+                                    dangerous_inner_html: "{markdown_to_html(&skill_text.read())}",
+                                }
+                            }
+                        }
+                        div { class: "config-actions",
+                            button { onclick: move |_| on_validate_skill.call(()), "Validate" }
+                            button {
+                                disabled: is_url_source(&skill_path.read()),
+                                onclick: move |_| on_save_skill.call(()),
+                                "Save Skill"
+                            }
+                        }
+                        if is_url_source(&skill_path.read()) {
+                            p { class: "hint", "Remote URL sources are read-only." }
+                        }
+                    }
+                    if !skill_error.read().is_empty() {
+                        div { class: "error", "{skill_error}" }
+                    }
+                    if !skill_status.read().is_empty() {
+                        div { class: "status", "{skill_status}" }
+                    }
+                }
+            }
+            if *active_tab.read() == UiTab::Heartbeat {
+                div { class: "settings",
+                    div { class: "settings-card",
+                        label { "Heartbeat (Markdown)" }
+                        p { class: "hint", "Source: {heartbeat_path}" }
+                        div { class: "config-head",
+                            label { "Editor" }
+                            label { "Preview" }
+                        }
+                        div { class: "config-grid",
+                            div { class: "config-panel",
+                                textarea {
+                                    id: "heartbeat-md",
+                                    value: "{heartbeat_text}",
+                                    rows: "18",
+                                    class: "config-editor",
+                                    oninput: move |evt| {
+                                        let mut heartbeat_text = heartbeat_text.clone();
+                                        heartbeat_text.set(evt.value());
+                                    },
+                                }
+                            }
+                            div { class: "config-panel",
+                                div {
+                                    class: "config-preview",
+                                    dangerous_inner_html: "{markdown_to_html(&heartbeat_text.read())}",
+                                }
+                            }
+                        }
+                        div { class: "config-actions",
+                            button { onclick: move |_| on_validate_heartbeat.call(()), "Validate" }
+                            button {
+                                disabled: is_url_source(&heartbeat_path.read()),
+                                onclick: move |_| on_save_heartbeat.call(()),
+                                "Save Heartbeat"
+                            }
+                        }
+                        if is_url_source(&heartbeat_path.read()) {
+                            p { class: "hint", "Remote URL sources are read-only." }
+                        }
+                    }
+                    if !heartbeat_error.read().is_empty() {
+                        div { class: "error", "{heartbeat_error}" }
+                    }
+                    if !heartbeat_status.read().is_empty() {
+                        div { class: "status", "{heartbeat_status}" }
                     }
                 }
             }

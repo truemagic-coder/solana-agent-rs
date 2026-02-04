@@ -6,12 +6,9 @@ use futures::StreamExt;
 use regex::Regex;
 
 use crate::error::Result;
-use crate::interfaces::guardrails::InputGuardrail;
 use crate::interfaces::providers::{ImageInput, MemoryProvider};
-use crate::interfaces::services::RoutingService as RoutingServiceTrait;
 use crate::reminders::ReminderStore;
 use crate::services::agent::AgentService;
-use crate::services::routing::RoutingService;
 
 #[derive(Debug, Clone)]
 pub enum UserInput {
@@ -35,7 +32,6 @@ pub struct ProcessOptions {
     pub output_format: OutputFormat,
     pub image_detail: String,
     pub json_schema: Option<serde_json::Value>,
-    pub router: Option<Arc<dyn RoutingServiceTrait>>,
 }
 
 #[derive(Debug, Clone)]
@@ -47,26 +43,20 @@ pub enum ProcessResult {
 
 pub struct QueryService {
     agent_service: Arc<AgentService>,
-    routing_service: Arc<RoutingService>,
     memory_provider: Option<Arc<dyn MemoryProvider>>,
     reminder_store: Option<Arc<ReminderStore>>,
-    input_guardrails: Vec<Arc<dyn InputGuardrail>>,
 }
 
 impl QueryService {
     pub fn new(
         agent_service: Arc<AgentService>,
-        routing_service: Arc<RoutingService>,
         memory_provider: Option<Arc<dyn MemoryProvider>>,
         reminder_store: Option<Arc<ReminderStore>>,
-        input_guardrails: Vec<Arc<dyn InputGuardrail>>,
     ) -> Self {
         Self {
             agent_service,
-            routing_service,
             memory_provider,
             reminder_store,
-            input_guardrails,
         }
     }
 
@@ -76,10 +66,7 @@ impl QueryService {
         query: &str,
         prompt: Option<&str>,
     ) -> Result<String> {
-        let mut processed_query = query.to_string();
-        for guardrail in &self.input_guardrails {
-            processed_query = guardrail.process(&processed_query).await?;
-        }
+        let processed_query = query.to_string();
 
         if let Some(response) = self
             .try_handle_search_command(user_id, &processed_query)
@@ -111,7 +98,6 @@ impl QueryService {
             return Ok(response);
         }
 
-        let agent_name = self.routing_service.route_query(&processed_query).await?;
         let reminder_context = if let Some(store) = &self.reminder_store {
             build_reminder_context(store, user_id).await
         } else {
@@ -136,13 +122,7 @@ impl QueryService {
 
         let response = self
             .agent_service
-            .generate_response(
-                &agent_name,
-                user_id,
-                &processed_query,
-                &memory_context,
-                prompt,
-            )
+            .generate_response(user_id, &processed_query, &memory_context, prompt)
             .await?;
 
         if let Some(provider) = &self.memory_provider {
@@ -163,7 +143,7 @@ impl QueryService {
         input: UserInput,
         options: ProcessOptions,
     ) -> Result<ProcessResult> {
-        let mut text = match input {
+        let text = match input {
             UserInput::Text(value) => value,
             UserInput::Audio {
                 bytes,
@@ -174,10 +154,6 @@ impl QueryService {
                     .await?
             }
         };
-
-        for guardrail in &self.input_guardrails {
-            text = guardrail.process(&text).await?;
-        }
 
         if let Some(response) = self.try_handle_search_command(user_id, &text).await? {
             if let Some(provider) = &self.memory_provider {
@@ -199,11 +175,6 @@ impl QueryService {
             return Ok(ProcessResult::Text(response));
         }
 
-        let agent_name = if let Some(router) = &options.router {
-            router.route_query(&text).await?
-        } else {
-            self.routing_service.route_query(&text).await?
-        };
         let reminder_context = if let Some(store) = &self.reminder_store {
             build_reminder_context(store, user_id).await
         } else {
@@ -230,7 +201,6 @@ impl QueryService {
             let structured = self
                 .agent_service
                 .generate_structured_response(
-                    &agent_name,
                     user_id,
                     &text,
                     &memory_context,
@@ -243,7 +213,6 @@ impl QueryService {
             let response = self
                 .agent_service
                 .generate_response_with_images(
-                    &agent_name,
                     user_id,
                     &text,
                     options.images,
@@ -257,7 +226,6 @@ impl QueryService {
             let response = self
                 .agent_service
                 .generate_response(
-                    &agent_name,
                     user_id,
                     &text,
                     &memory_context,
@@ -297,10 +265,7 @@ impl QueryService {
         prompt: Option<&'a str>,
     ) -> BoxStream<'a, Result<String>> {
         Box::pin(try_stream! {
-            let mut processed_query = query.to_string();
-            for guardrail in &self.input_guardrails {
-                processed_query = guardrail.process(&processed_query).await?;
-            }
+            let processed_query = query.to_string();
 
             if let Some(response) = self.try_handle_search_command(user_id, &processed_query).await? {
                 if let Some(provider) = &self.memory_provider {
@@ -320,7 +285,6 @@ impl QueryService {
                 return;
             }
 
-            let agent_name = self.routing_service.route_query(&processed_query).await?;
             let reminder_context = if let Some(store) = &self.reminder_store {
                 build_reminder_context(store, user_id).await
             } else {
@@ -345,7 +309,6 @@ impl QueryService {
 
             let mut response_text = String::new();
             let mut stream = self.agent_service.generate_response_stream(
-                &agent_name,
                 user_id,
                 &processed_query,
                 &memory_context,

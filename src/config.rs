@@ -13,42 +13,6 @@ pub struct OpenAiConfig {
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
-pub struct GuardrailConfig {
-    pub class: String,
-    pub config: Option<Value>,
-}
-
-#[derive(Debug, Clone, Deserialize, Serialize)]
-pub struct GuardrailsConfig {
-    pub input: Option<Vec<GuardrailConfig>>,
-    pub output: Option<Vec<GuardrailConfig>>,
-}
-#[derive(Debug, Clone, Deserialize, Serialize)]
-pub struct AgentConfig {
-    pub name: String,
-    pub instructions: String,
-    pub specialization: String,
-    pub description: Option<String>,
-    pub tools: Option<Vec<String>>,
-    pub capture_name: Option<String>,
-    pub capture_schema: Option<Value>,
-}
-
-#[derive(Debug, Clone, Deserialize, Serialize)]
-pub struct BusinessValue {
-    pub name: String,
-    pub description: String,
-}
-
-#[derive(Debug, Clone, Deserialize, Serialize)]
-pub struct BusinessConfig {
-    pub mission: Option<String>,
-    pub voice: Option<String>,
-    pub values: Option<Vec<BusinessValue>>,
-    pub goals: Option<Vec<String>>,
-}
-
-#[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct MemoryConfig {
     pub enabled: Option<bool>,
     pub sqlite_path: Option<String>,
@@ -63,10 +27,9 @@ pub struct MemoryConfig {
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct Config {
     pub openai: Option<OpenAiConfig>,
-    pub agents: Vec<AgentConfig>,
-    pub business: Option<BusinessConfig>,
+    pub skill_file: Option<String>,
+    pub heartbeat_file: Option<String>,
     pub memory: Option<MemoryConfig>,
-    pub guardrails: Option<GuardrailsConfig>,
     pub tools: Option<Value>,
     pub brains: Option<Value>,
 }

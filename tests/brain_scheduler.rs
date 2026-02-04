@@ -88,16 +88,22 @@ async fn brain_manager_loads_and_dispatches() {
 
 #[tokio::test]
 async fn scheduler_runs_jobs() {
-    let count = Arc::new(Mutex::new(0u32));
-    let mut scheduler = Scheduler::new();
-    scheduler.register_job(Arc::new(TickJob {
-        count: count.clone(),
-    }));
+    let result = tokio::time::timeout(Duration::from_secs(1), async {
+        let count = Arc::new(Mutex::new(0u32));
+        let mut scheduler = Scheduler::new();
+        scheduler.register_job(Arc::new(TickJob {
+            count: count.clone(),
+        }));
 
-    scheduler.start();
-    tokio::time::sleep(Duration::from_millis(35)).await;
-    scheduler.stop().await;
+        scheduler.start();
+        tokio::time::sleep(Duration::from_millis(35)).await;
+        scheduler.stop().await;
 
-    let guard = count.lock().unwrap();
-    assert!(*guard >= 2);
+        let guard = count.lock().unwrap();
+        *guard
+    })
+    .await;
+
+    let count = result.expect("scheduler test timed out");
+    assert!(count >= 2);
 }

@@ -15,10 +15,7 @@ pub struct ToolRegistry {
     tools: RwLock<HashMap<String, Arc<dyn Tool>>>,
     agent_tools: RwLock<HashMap<String, HashSet<String>>>,
     config: RwLock<serde_json::Value>,
-    enabled_tools: RwLock<HashSet<String>>,
-    disabled_tools: RwLock<HashSet<String>>,
     audit_log_path: RwLock<Option<String>>,
-    safe_mode: RwLock<bool>,
 }
 
 impl ToolRegistry {
@@ -27,10 +24,7 @@ impl ToolRegistry {
             tools: RwLock::new(HashMap::new()),
             agent_tools: RwLock::new(HashMap::new()),
             config: RwLock::new(serde_json::Value::Object(Default::default())),
-            enabled_tools: RwLock::new(HashSet::new()),
-            disabled_tools: RwLock::new(HashSet::new()),
             audit_log_path: RwLock::new(Some("./data/tool_audit.log".to_string())),
-            safe_mode: RwLock::new(false),
         }
     }
 
@@ -46,28 +40,12 @@ impl ToolRegistry {
             return false;
         }
         tools.insert(name.clone(), tool);
-        let safe_mode = *self.safe_mode.read().await;
-        let disabled = {
-            let disabled = self.disabled_tools.read().await;
-            disabled.contains(&name)
-        };
-        let allowed = {
-            let enabled = self.enabled_tools.read().await;
-            enabled.contains(&name)
-        };
-        if !disabled && (!safe_mode || allowed) {
-            let mut enabled = self.enabled_tools.write().await;
-            enabled.insert(name);
-        }
         true
     }
 
     pub async fn assign_tool_to_agent(&self, agent_name: &str, tool_name: &str) -> bool {
         let tools = self.tools.read().await;
         if !tools.contains_key(tool_name) {
-            return false;
-        }
-        if !self.is_tool_enabled(tool_name).await {
             return false;
         }
         let mut agent_tools = self.agent_tools.write().await;
@@ -86,24 +64,9 @@ impl ToolRegistry {
     pub async fn get_agent_tools(&self, agent_name: &str) -> Vec<Arc<dyn Tool>> {
         let agent_tools = self.agent_tools.read().await;
         let tools = self.tools.read().await;
-        let enabled = self.enabled_tools.read().await;
-        let disabled = self.disabled_tools.read().await;
-        let safe_mode = *self.safe_mode.read().await;
         let names = agent_tools.get(agent_name).cloned().unwrap_or_default();
         names
             .into_iter()
-            .filter(|name| {
-                if safe_mode && enabled.is_empty() {
-                    return false;
-                }
-                if !enabled.is_empty() {
-                    return enabled.contains(name);
-                }
-                if !disabled.is_empty() {
-                    return !disabled.contains(name);
-                }
-                true
-            })
             .filter_map(|name| tools.get(&name).cloned())
             .collect()
     }
@@ -113,72 +76,12 @@ impl ToolRegistry {
         tools.keys().cloned().collect()
     }
 
-    pub async fn list_enabled_tools(&self) -> Vec<String> {
-        let enabled = self.enabled_tools.read().await;
-        enabled.iter().cloned().collect()
-    }
-
-    pub async fn is_tool_enabled(&self, tool_name: &str) -> bool {
-        let disabled = self.disabled_tools.read().await;
-        if disabled.contains(tool_name) {
-            return false;
-        }
-        let safe_mode = *self.safe_mode.read().await;
-        let enabled = self.enabled_tools.read().await;
-        if safe_mode && enabled.is_empty() {
-            return false;
-        }
-        if enabled.is_empty() {
-            return true;
-        }
-        enabled.contains(tool_name)
-    }
-
-    pub async fn enable_tool(&self, tool_name: &str) -> bool {
-        let tools = self.tools.read().await;
-        if !tools.contains_key(tool_name) {
-            return false;
-        }
-        {
-            let mut disabled = self.disabled_tools.write().await;
-            disabled.remove(tool_name);
-        }
-        let mut enabled = self.enabled_tools.write().await;
-        enabled.insert(tool_name.to_string());
-        true
-    }
-
-    pub async fn disable_tool(&self, tool_name: &str) -> bool {
-        {
-            let mut disabled = self.disabled_tools.write().await;
-            disabled.insert(tool_name.to_string());
-        }
-        let mut enabled = self.enabled_tools.write().await;
-        if !enabled.remove(tool_name) {
-            // still return true if tool existed; disabling only needs to mark it disabled
-        }
-        drop(enabled);
-
-        let mut agent_tools = self.agent_tools.write().await;
-        for tools in agent_tools.values_mut() {
-            tools.remove(tool_name);
-        }
-        true
-    }
-
     pub async fn configure_all_tools(&self, config: serde_json::Value) -> Result<()> {
         {
             let mut cfg = self.config.write().await;
             *cfg = config.clone();
         }
-
-        let mut apply_enabled_filter = false;
         if let Some(settings) = config.get("tools").and_then(|v| v.get("settings")) {
-            if let Some(safe_mode) = settings.get("safe_mode").and_then(|v| v.as_bool()) {
-                let mut guard = self.safe_mode.write().await;
-                *guard = safe_mode;
-            }
-
             if let Some(path) = settings
                 .get("audit_log_path")
                 .and_then(|v| v.as_str())
@@ -189,54 +92,6 @@ impl ToolRegistry {
                     *guard = None;
                 } else {
                     *guard = Some(path.to_string());
-                }
-            }
-
-            if let Some(enabled) = settings.get("enabled").and_then(|v| v.as_array()) {
-                let mut enabled_set = HashSet::new();
-                for name in enabled {
-                    if let Some(name) = name.as_str() {
-                        enabled_set.insert(name.to_string());
-                    }
-                }
-                let mut guard = self.enabled_tools.write().await;
-                *guard = enabled_set;
-                apply_enabled_filter = true;
-            }
-
-            if let Some(disabled) = settings.get("disabled").and_then(|v| v.as_array()) {
-                let mut guard = self.disabled_tools.write().await;
-                guard.clear();
-                for name in disabled {
-                    if let Some(name) = name.as_str() {
-                        guard.insert(name.to_string());
-                    }
-                }
-                apply_enabled_filter = true;
-            }
-
-            if settings.get("enabled").is_none() {
-                let safe_mode = *self.safe_mode.read().await;
-                if safe_mode {
-                    let mut guard = self.enabled_tools.write().await;
-                    guard.clear();
-                    apply_enabled_filter = true;
-                }
-            }
-        }
-
-        if apply_enabled_filter {
-            let enabled = self.enabled_tools.read().await.clone();
-            let disabled = self.disabled_tools.read().await.clone();
-            let safe_mode = *self.safe_mode.read().await;
-            let mut agent_tools = self.agent_tools.write().await;
-            for tools in agent_tools.values_mut() {
-                if safe_mode && enabled.is_empty() {
-                    tools.clear();
-                } else if !enabled.is_empty() {
-                    tools.retain(|name| enabled.contains(name));
-                } else if !disabled.is_empty() {
-                    tools.retain(|name| !disabled.contains(name));
                 }
             }
         }

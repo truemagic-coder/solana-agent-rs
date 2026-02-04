@@ -1,54 +1,24 @@
 {
   "openai": {
-    "api_key": "YOUR_OPENAI_API_KEY",
-    "model": "gpt-4o-mini",
-    "base_url": null
+    "api_key": null,
+    "model": "ministral-3:14b",
+    "base_url": "http://localhost:11434/v1"
   },
-  "agents": [
-    {
-      "name": "butterfly",
-      "instructions": "You are Butterfly, a helpful assistant.",
-      "specialization": "general",
-      "description": "Primary assistant",
-      "tools": ["search_internet", "reminders", "mcp", "wakeup", "http_call", "todo", "planning", "tasks"]
-    }
-  ],
-  "business": {
-    "mission": "",
-    "voice": "",
-    "values": [],
-    "goals": []
-  },
+  "skill_file": "./skill.md",
+  "heartbeat_file": "./heartbeat.md",
   "memory": {
     "enabled": true,
     "sqlite_path": "./data/butterfly-bot.db",
     "lancedb_path": "./data/lancedb",
-    "summary_model": null,
-    "embedding_model": null,
-    "rerank_model": null,
-    "summary_threshold": 24,
-    "retention_days": 365
-  },
-  "guardrails": {
-    "input": [],
-    "output": []
+    "summary_model": "ministral-3:14b",
+    "embedding_model": "embeddinggemma:latest",
+    "rerank_model": "qllama/bge-reranker-v2-m3",
+    "summary_threshold": null,
+    "retention_days": null
   },
   "tools": {
     "settings": {
-      "safe_mode": false,
-      "enabled": [],
-      "disabled": [],
-      "audit_log_path": "./data/tool_audit.log",
-      "permissions": {
-        "search_internet": true,
-        "reminders": true,
-        "mcp": true,
-        "wakeup": true,
-        "http_call": true,
-        "todo": true,
-        "planning": true,
-        "tasks": true
-      }
+      "audit_log_path": "./data/tool_audit.log"
     },
     "search_internet": {
       "api_key": "YOUR_SEARCH_API_KEY",
@@ -58,8 +28,7 @@
       "grok_web_search": true,
       "grok_x_search": true,
       "grok_timeout": 90,
-      "network_allow": ["api.openai.com"],
-      "default_deny": false
+      "network_allow": ["api.openai.com"]
     },
     "reminders": {
       "sqlite_path": "./data/butterfly-bot.db"

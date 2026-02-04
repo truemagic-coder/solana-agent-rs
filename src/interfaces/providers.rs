@@ -122,17 +122,6 @@ pub trait MemoryProvider: Send + Sync {
         Ok(0)
     }
 
-    async fn save_capture(
-        &self,
-        _user_id: &str,
-        _capture_name: &str,
-        _agent_name: Option<&str>,
-        _data: Value,
-        _schema: Option<Value>,
-    ) -> Result<Option<String>> {
-        Ok(None)
-    }
-
     async fn search(&self, _user_id: &str, _query: &str, _limit: usize) -> Result<Vec<String>> {
         Ok(Vec::new())
     }

@@ -11,7 +11,7 @@ use tokio::sync::{broadcast, RwLock};
 use tower::ServiceExt;
 
 use butterfly_bot::client::ButterflyBot;
-use butterfly_bot::config::{AgentConfig, Config, OpenAiConfig};
+use butterfly_bot::config::{Config, OpenAiConfig};
 use butterfly_bot::daemon::{build_router, AppState};
 use butterfly_bot::reminders::ReminderStore;
 
@@ -22,18 +22,9 @@ async fn make_agent(server: &MockServer) -> ButterflyBot {
             model: Some("gpt-4o-mini".to_string()),
             base_url: Some(server.base_url()),
         }),
-        agents: vec![AgentConfig {
-            name: "agent".to_string(),
-            instructions: "inst".to_string(),
-            specialization: "spec".to_string(),
-            description: None,
-            tools: None,
-            capture_name: None,
-            capture_schema: None,
-        }],
-        business: None,
+        skill_file: None,
+        heartbeat_file: None,
         memory: None,
-        guardrails: None,
         tools: None,
         brains: None,
     };

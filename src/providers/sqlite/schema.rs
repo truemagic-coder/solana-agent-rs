@@ -9,18 +9,6 @@ diesel::table! {
 }
 
 diesel::table! {
-    captures (id) {
-        id -> Integer,
-        user_id -> Text,
-        capture_name -> Text,
-        agent_name -> Nullable<Text>,
-        data -> Text,
-        schema -> Nullable<Text>,
-        timestamp -> BigInt,
-    }
-}
-
-diesel::table! {
     memories (id) {
         id -> Integer,
         user_id -> Text,

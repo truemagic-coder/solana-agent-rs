@@ -16,9 +16,10 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
 use crate::client::ButterflyBot;
-use crate::config::{AgentConfig, Config, MemoryConfig, OpenAiConfig};
+use crate::config::{Config, MemoryConfig, OpenAiConfig};
 use crate::config_store;
 use crate::error::{ButterflyBotError, Result};
+use crate::factories::agent_factory::load_markdown_source;
 use crate::interfaces::scheduler::ScheduledJob;
 use crate::reminders::ReminderStore;
 use crate::scheduler::Scheduler;
@@ -65,6 +66,7 @@ struct WakeupJob {
     interval: Duration,
     ui_event_tx: broadcast::Sender<UiEvent>,
     audit_log_path: Option<String>,
+    heartbeat_source: Option<String>,
 }
 
 struct ScheduledTasksJob {
@@ -109,7 +111,6 @@ impl ScheduledJob for ScheduledTasksJob {
                 output_format: OutputFormat::Text,
                 image_detail: "auto".to_string(),
                 json_schema: None,
-                router: None,
             };
             let input = format!("Scheduled task '{}': {}", task.name, task.prompt);
             let result = agent
@@ -164,6 +165,34 @@ impl ScheduledJob for WakeupJob {
 
     async fn run(&self) -> Result<()> {
         let now = now_ts();
+        if let Some(source) = &self.heartbeat_source {
+            match load_markdown_source(Some(source.as_str())).await {
+                Ok(markdown) => {
+                    let agent = self.agent.read().await.clone();
+                    agent.set_heartbeat_markdown(markdown).await;
+                    let event = UiEvent {
+                        event_type: "wakeup".to_string(),
+                        user_id: "system".to_string(),
+                        tool: "heartbeat".to_string(),
+                        status: "ok".to_string(),
+                        payload: json!({"source": source}),
+                        timestamp: now_ts(),
+                    };
+                    let _ = self.ui_event_tx.send(event);
+                }
+                Err(err) => {
+                    let event = UiEvent {
+                        event_type: "wakeup".to_string(),
+                        user_id: "system".to_string(),
+                        tool: "heartbeat".to_string(),
+                        status: "error".to_string(),
+                        payload: json!({"source": source, "error": err.to_string()}),
+                        timestamp: now_ts(),
+                    };
+                    let _ = self.ui_event_tx.send(event);
+                }
+            }
+        }
         let tasks = self.store.list_due(now, 32).await?;
         for task in tasks {
             let agent = self.agent.read().await.clone();
@@ -177,7 +206,6 @@ impl ScheduledJob for WakeupJob {
                 output_format: OutputFormat::Text,
                 image_detail: "auto".to_string(),
                 json_schema: None,
-                router: None,
             };
             let input = format!("Wakeup task '{}': {}", task.name, task.prompt);
             let result = agent
@@ -297,7 +325,6 @@ async fn process_text(
         output_format: OutputFormat::Text,
         image_detail: "auto".to_string(),
         json_schema: None,
-        router: None,
     };
 
     let agent = state.agent.read().await.clone();
@@ -554,39 +581,9 @@ fn default_config(db_path: &str) -> Config {
             model: Some(model),
             base_url: Some(base_url),
         }),
-        agents: vec![AgentConfig {
-            name: "default_agent".to_string(),
-            description: Some("Butterfly, an expert conversationalist and assistant.".to_string()),
-            instructions:
-                r#"You are Butterfly, an expert conversationalist and calm, capable assistant.
-
-Core behavior:
-- Be warm, concise, and natural. Ask clarifying questions when the request is ambiguous.
-- Prefer actionable help over long explanations. Offer a short plan when helpful.
-- If you’re unsure, say so briefly and suggest the next best step.
-
-Tools you can use:
-- reminders: create/list/complete/delete/snooze reminders and todos.
-    Use it when the user asks for reminders, alarms, timers, tasks, or follow-ups.
-- search_internet: fetch up-to-date info when the user asks for current events or live data.
-
-Memory:
-- Use provided context, but do not treat assistant statements as user facts.
-- Confirm personal details before relying on them.
-
-When scheduling:
-- If the user asks “in X seconds/minutes/hours,” create a reminder with that delay.
-- If they ask “tomorrow at 3pm” or similar, ask for timezone if missing.
-"#
-                .to_string(),
-            specialization: "conversation".to_string(),
-            tools: Some(vec!["reminders".to_string(), "search_internet".to_string()]),
-            capture_name: None,
-            capture_schema: None,
-        }],
-        business: None,
+        skill_file: Some("./skill.md".to_string()),
+        heartbeat_file: Some("./heartbeat.md".to_string()),
         memory,
-        guardrails: None,
         tools: None,
         brains: None,
     }
@@ -641,6 +638,9 @@ where
         interval: Duration::from_secs(wakeup_poll_seconds.max(1)),
         ui_event_tx: ui_event_tx.clone(),
         audit_log_path: wakeup_audit_log_path(config.as_ref()),
+        heartbeat_source: config
+            .as_ref()
+            .and_then(|cfg| cfg.heartbeat_file.clone()),
     }));
     let tasks_poll_seconds = config
         .as_ref()

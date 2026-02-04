@@ -12,5 +12,4 @@ DROP TRIGGER IF EXISTS messages_au;
 DROP TRIGGER IF EXISTS messages_ad;
 DROP TRIGGER IF EXISTS messages_ai;
 DROP TABLE IF EXISTS messages_fts;
-DROP TABLE IF EXISTS captures;
 DROP TABLE IF EXISTS messages;

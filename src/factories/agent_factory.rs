@@ -1,7 +1,5 @@
-use std::collections::HashSet;
 use std::sync::Arc;
 
-use serde_json::Value;
 
 use crate::brain::manager::BrainManager;
 use crate::brain::plugins::abstraction_extraction::AbstractionExtractionBrain;
@@ -43,7 +41,6 @@ use crate::brain::plugins::mental_health_detection::MentalHealthDetectionBrain;
 use crate::brain::plugins::meta_awareness::MetaAwarenessBrain;
 use crate::brain::plugins::meta_learning::MetaLearningBrain;
 use crate::brain::plugins::motivation_micro_coach::MotivationMicroCoachBrain;
-use crate::brain::plugins::multi_agent_coordination::MultiAgentCoordinationBrain;
 use crate::brain::plugins::narrative_identity::NarrativeIdentityBrain;
 use crate::brain::plugins::need_recognition::NeedRecognitionBrain;
 use crate::brain::plugins::persona_simulation::PersonaSimulationBrain;
@@ -67,10 +64,8 @@ use crate::brain::plugins::trust_transparency::TrustTransparencyBrain;
 use crate::brain::plugins::zep_context_enricher::ZepContextEnricherBrain;
 use crate::brain::plugins::zero_cost_reasoning::ZeroCostReasoningBrain;
 use crate::config::Config;
-use crate::domains::agent::BusinessMission;
+use crate::domains::agent::AIAgent;
 use crate::error::{ButterflyBotError, Result};
-use crate::guardrails::pii::{NoopGuardrail, PiiGuardrail};
-use crate::interfaces::guardrails::{InputGuardrail, OutputGuardrail};
 use crate::interfaces::plugins::Tool;
 use crate::providers::memory::InMemoryMemoryProvider;
 use crate::providers::openai::OpenAiProvider;
@@ -78,7 +73,6 @@ use crate::providers::sqlite::{SqliteMemoryProvider, SqliteMemoryProviderConfig}
 use crate::reminders::{default_reminder_db_path, resolve_reminder_db_path, ReminderStore};
 use crate::services::agent::{AgentService, UiEvent};
 use crate::services::query::QueryService;
-use crate::services::routing::RoutingService;
 use crate::tools::http_call::HttpCallTool;
 use crate::tools::mcp::McpTool;
 use crate::tools::planning::PlanningTool;
@@ -88,6 +82,7 @@ use crate::tools::tasks::TasksTool;
 use crate::tools::todo::TodoTool;
 use crate::tools::wakeup::WakeupTool;
 use tokio::sync::broadcast;
+use tokio::fs;
 
 pub struct ButterflyBotFactory;
 
@@ -103,7 +98,6 @@ impl ButterflyBotFactory {
         let memory_config = config.memory.clone();
         let config_value =
             serde_json::to_value(&config).map_err(|e| ButterflyBotError::Config(e.to_string()))?;
-        let tools_config = config.tools.clone().unwrap_or(Value::Null);
         let (api_key, model, base_url) = if let Some(openai) = config.openai {
             let api_key = openai
                 .api_key
@@ -130,49 +124,18 @@ impl ButterflyBotFactory {
         ));
         let llm_for_memory = llm.clone();
 
-        let business_mission = config.business.map(|b| {
-            let mut mission = BusinessMission::default();
-            mission.mission = b.mission;
-            mission.voice = b.voice;
-            if let Some(values) = b.values {
-                mission.values = values
-                    .into_iter()
-                    .map(|v| (v.name, v.description))
-                    .collect();
-            }
-            mission.goals = b.goals.unwrap_or_default();
-            mission
+        let skill_markdown = load_markdown_source(config.skill_file.as_deref()).await?;
+        let heartbeat_markdown = load_markdown_source(config.heartbeat_file.as_deref()).await?;
+        let instructions = skill_markdown.unwrap_or_else(|| {
+            "You are Butterfly, a helpful assistant. Follow the skill file and user instructions."
+                .to_string()
         });
-
-        let mut input_guardrails: Vec<Arc<dyn InputGuardrail>> = Vec::new();
-        let mut output_guardrails: Vec<Arc<dyn OutputGuardrail>> = Vec::new();
-
-        if let Some(guardrails) = config.guardrails {
-            if let Some(input) = guardrails.input {
-                for spec in input {
-                    match spec.class.as_str() {
-                        "butterfly_bot.guardrails.pii.PII" | "PII" => {
-                            input_guardrails.push(Arc::new(PiiGuardrail::new(spec.config)));
-                        }
-                        _ => {
-                            input_guardrails.push(Arc::new(NoopGuardrail));
-                        }
-                    }
-                }
-            }
-            if let Some(output) = guardrails.output {
-                for spec in output {
-                    match spec.class.as_str() {
-                        "butterfly_bot.guardrails.pii.PII" | "PII" => {
-                            output_guardrails.push(Arc::new(PiiGuardrail::new(spec.config)));
-                        }
-                        _ => {
-                            output_guardrails.push(Arc::new(NoopGuardrail));
-                        }
-                    }
-                }
-            }
-        }
+        let specialization = "general".to_string();
+        let agent = AIAgent {
+            name: "butterfly".to_string(),
+            instructions,
+            specialization,
+        };
 
         let mut brain_manager = BrainManager::new(config_value.clone());
         brain_manager.register_factory("abstraction_extraction", |cfg| {
@@ -265,9 +228,6 @@ impl ButterflyBotFactory {
             Arc::new(MotivationMicroCoachBrain::new())
         });
         brain_manager.register_factory("meta_learning", |_| Arc::new(MetaLearningBrain::new()));
-        brain_manager.register_factory("multi_agent_coordination", |_| {
-            Arc::new(MultiAgentCoordinationBrain::new())
-        });
         brain_manager.register_factory("narrative_identity", |_| {
             Arc::new(NarrativeIdentityBrain::new())
         });
@@ -328,168 +288,82 @@ impl ButterflyBotFactory {
         brain_manager.load_plugins();
         let brain_manager = Arc::new(brain_manager);
 
-        let mut agent_service = AgentService::new(
+        let agent_name = agent.name.clone();
+        let agent_service = AgentService::new(
             llm.clone(),
-            business_mission,
-            output_guardrails,
+            agent,
+            heartbeat_markdown,
             brain_manager,
             ui_event_tx,
         );
-        let mut agent_tools: Vec<(String, Vec<String>)> = Vec::new();
-        for agent in config.agents {
-            agent_tools.push((agent.name.clone(), agent.tools.unwrap_or_default()));
-            agent_service.register_ai_agent(
-                agent.name,
-                agent.instructions,
-                agent.specialization,
-                agent.capture_name,
-                agent.capture_schema,
-            );
-        }
 
         let tool_registry = agent_service.tool_registry.clone();
         tool_registry
             .configure_all_tools(config_value.clone())
             .await?;
-        let has_search_config = tools_config.get("search_internet").is_some();
-        if has_search_config {
-            for (_, tools) in &mut agent_tools {
-                if !tools.iter().any(|tool| tool == "search_internet") {
-                    tools.push("search_internet".to_string());
-                }
-            }
-        }
-        let has_reminders_config = tools_config.get("reminders").is_some()
-            || memory_config
-                .as_ref()
-                .map(|memory| memory.enabled.unwrap_or(true))
-                .unwrap_or(false);
-        let has_mcp_config = tools_config.get("mcp").is_some();
-        let has_wakeup_config = tools_config.get("wakeup").is_some();
-        let has_http_call_config = tools_config.get("http_call").is_some();
-        let has_todo_config = tools_config.get("todo").is_some();
-        let has_planning_config = tools_config.get("planning").is_some();
-        let has_tasks_config = tools_config.get("tasks").is_some();
-        if has_reminders_config {
-            for (_, tools) in &mut agent_tools {
-                if !tools.iter().any(|tool| tool == "reminders") {
-                    tools.push("reminders".to_string());
-                }
-            }
-        }
-        if has_mcp_config {
-            for (_, tools) in &mut agent_tools {
-                if !tools.iter().any(|tool| tool == "mcp") {
-                    tools.push("mcp".to_string());
-                }
-            }
-        }
-        if has_wakeup_config {
-            for (_, tools) in &mut agent_tools {
-                if !tools.iter().any(|tool| tool == "wakeup") {
-                    tools.push("wakeup".to_string());
-                }
-            }
-        }
-        if has_http_call_config {
-            for (_, tools) in &mut agent_tools {
-                if !tools.iter().any(|tool| tool == "http_call") {
-                    tools.push("http_call".to_string());
-                }
-            }
-        }
-        if has_todo_config {
-            for (_, tools) in &mut agent_tools {
-                if !tools.iter().any(|tool| tool == "todo") {
-                    tools.push("todo".to_string());
-                }
-            }
-        }
-        if has_planning_config {
-            for (_, tools) in &mut agent_tools {
-                if !tools.iter().any(|tool| tool == "planning") {
-                    tools.push("planning".to_string());
-                }
-            }
-        }
-        if has_tasks_config {
-            for (_, tools) in &mut agent_tools {
-                if !tools.iter().any(|tool| tool == "tasks") {
-                    tools.push("tasks".to_string());
-                }
-            }
-        }
-        let mut enabled_tools: HashSet<String> = HashSet::new();
-        for (_, tools) in &agent_tools {
-            for tool in tools {
-                enabled_tools.insert(tool.to_string());
-            }
+        let mut registered_tools: Vec<String> = Vec::new();
+
+        let tool: Arc<dyn Tool> = Arc::new(SearchInternetTool::new());
+        tool.configure(&config_value)?;
+        if tool_registry.register_tool(tool).await {
+            registered_tools.push("search_internet".to_string());
         }
 
-        if enabled_tools.contains("search_internet") || has_search_config {
-            let tool: Arc<dyn Tool> = Arc::new(SearchInternetTool::new());
-            tool.configure(&config_value)?;
-            let _ = tool_registry.register_tool(tool).await;
+        let tool: Arc<dyn Tool> = Arc::new(RemindersTool::new());
+        tool.configure(&config_value)?;
+        if tool_registry.register_tool(tool).await {
+            registered_tools.push("reminders".to_string());
         }
 
-        if enabled_tools.contains("reminders") || has_reminders_config {
-            let tool: Arc<dyn Tool> = Arc::new(RemindersTool::new());
-            tool.configure(&config_value)?;
-            let _ = tool_registry.register_tool(tool).await;
+        let tool: Arc<dyn Tool> = Arc::new(McpTool::new());
+        tool.configure(&config_value)?;
+        if tool_registry.register_tool(tool).await {
+            registered_tools.push("mcp".to_string());
         }
 
-        if enabled_tools.contains("mcp") || has_mcp_config {
-            let tool: Arc<dyn Tool> = Arc::new(McpTool::new());
-            tool.configure(&config_value)?;
-            let _ = tool_registry.register_tool(tool).await;
+        let tool: Arc<dyn Tool> = Arc::new(WakeupTool::new());
+        tool.configure(&config_value)?;
+        if tool_registry.register_tool(tool).await {
+            registered_tools.push("wakeup".to_string());
         }
 
-        if enabled_tools.contains("wakeup") || has_wakeup_config {
-            let tool: Arc<dyn Tool> = Arc::new(WakeupTool::new());
-            tool.configure(&config_value)?;
-            let _ = tool_registry.register_tool(tool).await;
+        let tool: Arc<dyn Tool> = Arc::new(HttpCallTool::new());
+        tool.configure(&config_value)?;
+        if tool_registry.register_tool(tool).await {
+            registered_tools.push("http_call".to_string());
         }
 
-        if enabled_tools.contains("http_call") || has_http_call_config {
-            let tool: Arc<dyn Tool> = Arc::new(HttpCallTool::new());
-            tool.configure(&config_value)?;
-            let _ = tool_registry.register_tool(tool).await;
+        let tool: Arc<dyn Tool> = Arc::new(TodoTool::new());
+        tool.configure(&config_value)?;
+        if tool_registry.register_tool(tool).await {
+            registered_tools.push("todo".to_string());
         }
 
-        if enabled_tools.contains("todo") || has_todo_config {
-            let tool: Arc<dyn Tool> = Arc::new(TodoTool::new());
-            tool.configure(&config_value)?;
-            let _ = tool_registry.register_tool(tool).await;
+        let tool: Arc<dyn Tool> = Arc::new(PlanningTool::new());
+        tool.configure(&config_value)?;
+        if tool_registry.register_tool(tool).await {
+            registered_tools.push("planning".to_string());
         }
 
-        if enabled_tools.contains("planning") || has_planning_config {
-            let tool: Arc<dyn Tool> = Arc::new(PlanningTool::new());
-            tool.configure(&config_value)?;
-            let _ = tool_registry.register_tool(tool).await;
+        let tool: Arc<dyn Tool> = Arc::new(TasksTool::new());
+        tool.configure(&config_value)?;
+        if tool_registry.register_tool(tool).await {
+            registered_tools.push("tasks".to_string());
         }
 
-        if enabled_tools.contains("tasks") || has_tasks_config {
-            let tool: Arc<dyn Tool> = Arc::new(TasksTool::new());
-            tool.configure(&config_value)?;
-            let _ = tool_registry.register_tool(tool).await;
-        }
-
-        for (agent_name, tools) in &agent_tools {
-            for tool_name in tools {
-                let assigned = tool_registry
-                    .assign_tool_to_agent(agent_name, tool_name)
-                    .await;
-                if !assigned {
-                    return Err(ButterflyBotError::Config(format!(
-                        "Tool '{}' is not registered",
-                        tool_name
-                    )));
-                }
+        for tool_name in &registered_tools {
+            let assigned = tool_registry
+                .assign_tool_to_agent(&agent_name, tool_name)
+                .await;
+            if !assigned {
+                return Err(ButterflyBotError::Config(format!(
+                    "Tool '{}' is not registered",
+                    tool_name
+                )));
             }
         }
 
         let agent_service = Arc::new(agent_service);
-        let routing_service = Arc::new(RoutingService::new(agent_service.clone()));
         let memory_provider: Arc<dyn crate::interfaces::providers::MemoryProvider> =
             if let Some(memory) = memory_config {
                 if memory.enabled.unwrap_or(true) {
@@ -534,7 +408,7 @@ impl ButterflyBotFactory {
                     as Arc<dyn crate::interfaces::providers::MemoryProvider>
             };
 
-        let reminder_store = if enabled_tools.contains("reminders") || has_reminders_config {
+        let reminder_store = if registered_tools.iter().any(|name| name == "reminders") {
             let path =
                 resolve_reminder_db_path(&config_value).unwrap_or_else(default_reminder_db_path);
             Some(Arc::new(ReminderStore::new(path).await?))
@@ -544,10 +418,40 @@ impl ButterflyBotFactory {
 
         Ok(QueryService::new(
             agent_service,
-            routing_service,
             Some(memory_provider),
             reminder_store,
-            input_guardrails,
         ))
     }
+}
+
+pub(crate) async fn load_markdown_source(source: Option<&str>) -> Result<Option<String>> {
+    let Some(source) = source else {
+        return Ok(None);
+    };
+    let trimmed = source.trim();
+    if trimmed.is_empty() {
+        return Ok(None);
+    }
+
+    if trimmed.starts_with("http://") || trimmed.starts_with("https://") {
+        let response = reqwest::get(trimmed)
+            .await
+            .map_err(|e| ButterflyBotError::Config(e.to_string()))?;
+        if !response.status().is_success() {
+            return Err(ButterflyBotError::Config(format!(
+                "Failed to fetch markdown from {}",
+                trimmed
+            )));
+        }
+        let text = response
+            .text()
+            .await
+            .map_err(|e| ButterflyBotError::Config(e.to_string()))?;
+        return Ok(Some(text));
+    }
+
+    let text = fs::read_to_string(trimmed)
+        .await
+        .map_err(|e| ButterflyBotError::Config(e.to_string()))?;
+    Ok(Some(text))
 }

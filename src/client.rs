@@ -89,13 +89,15 @@ impl ButterflyBot {
             .await
     }
 
-    pub async fn register_tool(&self, agent_name: &str, tool: Arc<dyn Tool>) -> Result<bool> {
+    pub async fn register_tool(&self, tool: Arc<dyn Tool>) -> Result<bool> {
         let agent_service = self.query_service.agent_service();
         let registry = agent_service.tool_registry.clone();
         if !registry.register_tool(tool.clone()).await {
             return Ok(false);
         }
-        let assigned = registry.assign_tool_to_agent(agent_name, tool.name()).await;
+        let assigned = registry
+            .assign_tool_to_agent(agent_service.agent_name(), tool.name())
+            .await;
         if !assigned {
             return Err(ButterflyBotError::Runtime(
                 "Tool registered but could not assign to agent".to_string(),
@@ -107,5 +109,10 @@ impl ButterflyBot {
     pub async fn brain_tick(&self) {
         let agent_service = self.query_service.agent_service();
         agent_service.dispatch_brain_tick().await;
+    }
+
+    pub async fn set_heartbeat_markdown(&self, heartbeat_markdown: Option<String>) {
+        let agent_service = self.query_service.agent_service();
+        agent_service.set_heartbeat_markdown(heartbeat_markdown).await;
     }
 }

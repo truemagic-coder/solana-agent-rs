@@ -32,19 +32,6 @@ CREATE TRIGGER IF NOT EXISTS messages_au AFTER UPDATE ON messages BEGIN
     VALUES (new.id, new.content, new.user_id, new.id);
 END;
 
-CREATE TABLE IF NOT EXISTS captures (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    user_id TEXT NOT NULL,
-    capture_name TEXT NOT NULL,
-    agent_name TEXT,
-    data TEXT NOT NULL,
-    schema TEXT,
-    timestamp BIGINT NOT NULL
-);
-
-CREATE INDEX IF NOT EXISTS idx_captures_user_time
-    ON captures(user_id, timestamp);
-
 CREATE TABLE IF NOT EXISTS memories (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     user_id TEXT NOT NULL,

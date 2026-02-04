@@ -16,7 +16,7 @@ use pulldown_cmark_mdcat::{
 use reqwest::header::AUTHORIZATION;
 #[cfg(not(test))]
 #[cfg(not(test))]
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 #[cfg(not(test))]
 use std::io::{self as std_io, BufWriter, Write};
 #[cfg(not(test))]
@@ -27,7 +27,7 @@ use syntect::parsing::SyntaxSet;
 use tokio::io::{self, AsyncBufReadExt};
 
 #[cfg(not(test))]
-use butterfly_bot::config::{AgentConfig, Config, MemoryConfig, OpenAiConfig};
+use butterfly_bot::config::{Config, MemoryConfig, OpenAiConfig};
 #[cfg(not(test))]
 use butterfly_bot::config_store;
 #[cfg(not(test))]
@@ -39,7 +39,21 @@ use butterfly_bot::interfaces::plugins::Tool;
 #[cfg(not(test))]
 use butterfly_bot::plugins::registry::ToolRegistry;
 #[cfg(not(test))]
+use butterfly_bot::tools::http_call::HttpCallTool;
+#[cfg(not(test))]
+use butterfly_bot::tools::mcp::McpTool;
+#[cfg(not(test))]
+use butterfly_bot::tools::planning::PlanningTool;
+#[cfg(not(test))]
+use butterfly_bot::tools::reminders::RemindersTool;
+#[cfg(not(test))]
 use butterfly_bot::tools::search_internet::SearchInternetTool;
+#[cfg(not(test))]
+use butterfly_bot::tools::tasks::TasksTool;
+#[cfg(not(test))]
+use butterfly_bot::tools::todo::TodoTool;
+#[cfg(not(test))]
+use butterfly_bot::tools::wakeup::WakeupTool;
 #[cfg(not(test))]
 use butterfly_bot::ui;
 #[cfg(not(test))]
@@ -111,24 +125,6 @@ enum Commands {
     DbKeySet {
         #[arg(long)]
         key: String,
-    },
-    Tools {
-        #[command(subcommand)]
-        command: ToolsCommand,
-    },
-}
-
-#[cfg(not(test))]
-#[derive(clap::Subcommand, Debug)]
-enum ToolsCommand {
-    List,
-    Enable {
-        #[arg(long)]
-        name: String,
-    },
-    Disable {
-        #[arg(long)]
-        name: String,
     },
 }
 
@@ -416,10 +412,6 @@ async fn main() -> Result<()> {
                 println!("Database key stored in keyring.");
                 return Ok(());
             }
-            Commands::Tools { command } => {
-                handle_tools_command(&cli.db, command)?;
-                return Ok(());
-            }
             Commands::Status => {
                 let status = daemon_status(&cli).await?;
                 println!("{status}");
@@ -491,24 +483,11 @@ async fn main() -> Result<()> {
 #[cfg(not(test))]
 async fn ensure_tool_secrets(db_path: &str) -> Result<()> {
     let mut config = Config::from_store(db_path)?;
-    let mut agent_tools: Vec<(String, Vec<String>)> = Vec::new();
-    for agent in &config.agents {
-        agent_tools.push((agent.name.clone(), agent.tools.clone().unwrap_or_default()));
-    }
-
-    let mut enabled_tools: HashSet<String> = HashSet::new();
-    for (_, tools) in &agent_tools {
-        for tool in tools {
-            enabled_tools.insert(tool.to_string());
-        }
-    }
 
     let mut tools_config = config.tools.clone().unwrap_or(serde_json::Value::Null);
     let has_search_config = tools_config.get("search_internet").is_some();
     let mut updated_config = false;
-    if (enabled_tools.contains("search_internet") || has_search_config)
-        && ensure_search_internet_provider(&mut config)?
-    {
+    if has_search_config && ensure_search_internet_provider(&mut config)? {
         updated_config = true;
     }
 
@@ -524,22 +503,54 @@ async fn ensure_tool_secrets(db_path: &str) -> Result<()> {
     registry.configure_all_tools(config_value.clone()).await?;
 
     let has_search_config = tools_config.get("search_internet").is_some();
-    if enabled_tools.contains("search_internet") || has_search_config {
+    if has_search_config {
         let tool: std::sync::Arc<dyn Tool> = std::sync::Arc::new(SearchInternetTool::new());
         tool.configure(&config_value)?;
         let _ = registry.register_tool(tool).await;
     }
 
+    let tool: std::sync::Arc<dyn Tool> = std::sync::Arc::new(RemindersTool::new());
+    tool.configure(&config_value)?;
+    let _ = registry.register_tool(tool).await;
+
+    let tool: std::sync::Arc<dyn Tool> = std::sync::Arc::new(McpTool::new());
+    tool.configure(&config_value)?;
+    let _ = registry.register_tool(tool).await;
+
+    let tool: std::sync::Arc<dyn Tool> = std::sync::Arc::new(WakeupTool::new());
+    tool.configure(&config_value)?;
+    let _ = registry.register_tool(tool).await;
+
+    let tool: std::sync::Arc<dyn Tool> = std::sync::Arc::new(HttpCallTool::new());
+    tool.configure(&config_value)?;
+    let _ = registry.register_tool(tool).await;
+
+    let tool: std::sync::Arc<dyn Tool> = std::sync::Arc::new(TodoTool::new());
+    tool.configure(&config_value)?;
+    let _ = registry.register_tool(tool).await;
+
+    let tool: std::sync::Arc<dyn Tool> = std::sync::Arc::new(PlanningTool::new());
+    tool.configure(&config_value)?;
+    let _ = registry.register_tool(tool).await;
+
+    let tool: std::sync::Arc<dyn Tool> = std::sync::Arc::new(TasksTool::new());
+    tool.configure(&config_value)?;
+    let _ = registry.register_tool(tool).await;
+
     let mut required: HashMap<String, String> = HashMap::new();
-    for (_, tools) in &agent_tools {
-        for tool_name in tools {
-            if !registry.is_tool_enabled(tool_name).await {
-                continue;
-            }
-            if let Some(tool) = registry.get_tool(tool_name).await {
-                for secret in tool.required_secrets_for_config(&config_value) {
-                    required.insert(secret.name, secret.prompt);
-                }
+    for tool_name in [
+        "search_internet",
+        "reminders",
+        "mcp",
+        "wakeup",
+        "http_call",
+        "todo",
+        "planning",
+        "tasks",
+    ] {
+        if let Some(tool) = registry.get_tool(tool_name).await {
+            for secret in tool.required_secrets_for_config(&config_value) {
+                required.insert(secret.name, secret.prompt);
             }
         }
     }
@@ -607,47 +618,6 @@ fn ensure_search_internet_provider(config: &mut Config) -> Result<bool> {
 }
 
 #[cfg(not(test))]
-fn handle_tools_command(db_path: &str, command: &ToolsCommand) -> Result<()> {
-    match command {
-        ToolsCommand::List => {
-            let config = Config::from_store(db_path)?;
-            let rows = list_tools_from_config(&config);
-            if rows.is_empty() {
-                println!("No tools configured.");
-                return Ok(());
-            }
-            for (name, enabled) in rows {
-                let status = if enabled { "enabled" } else { "disabled" };
-                println!("{name} [{status}]");
-            }
-            Ok(())
-        }
-        ToolsCommand::Enable { name } => {
-            let mut config = Config::from_store(db_path)?;
-            let changed = update_tool_state(&mut config, name, true)?;
-            if changed {
-                config_store::save_config(db_path, &config)?;
-                println!("Enabled tool '{name}'.");
-            } else {
-                println!("Tool '{name}' already enabled.");
-            }
-            Ok(())
-        }
-        ToolsCommand::Disable { name } => {
-            let mut config = Config::from_store(db_path)?;
-            let changed = update_tool_state(&mut config, name, false)?;
-            if changed {
-                config_store::save_config(db_path, &config)?;
-                println!("Disabled tool '{name}'.");
-            } else {
-                println!("Tool '{name}' already disabled.");
-            }
-            Ok(())
-        }
-    }
-}
-
-#[cfg(not(test))]
 fn redacted_config_value(config: &Config) -> Result<serde_json::Value> {
     let mut value = serde_json::to_value(config)
         .map_err(|e| butterfly_bot::error::ButterflyBotError::Config(e.to_string()))?;
@@ -671,156 +641,6 @@ fn write_config_file(path: &str, value: &serde_json::Value) -> Result<()> {
     std::fs::write(path_obj, rendered)
         .map_err(|e| butterfly_bot::error::ButterflyBotError::Runtime(e.to_string()))?;
     Ok(())
-}
-
-#[cfg(not(test))]
-fn list_tools_from_config(config: &Config) -> Vec<(String, bool)> {
-    let mut names: std::collections::HashSet<String> = std::collections::HashSet::new();
-    let mut enabled: std::collections::HashSet<String> = std::collections::HashSet::new();
-    let mut disabled: std::collections::HashSet<String> = std::collections::HashSet::new();
-    let mut has_enabled_list = false;
-
-    if let Some(tools) = &config.tools {
-        if let Some(map) = tools.as_object() {
-            for (key, _) in map.iter() {
-                if key != "settings" {
-                    names.insert(key.clone());
-                }
-            }
-            if let Some(settings) = map.get("settings") {
-                if let Some(enabled_list) = settings.get("enabled").and_then(|v| v.as_array()) {
-                    has_enabled_list = true;
-                    for item in enabled_list {
-                        if let Some(name) = item.as_str() {
-                            enabled.insert(name.to_string());
-                            names.insert(name.to_string());
-                        }
-                    }
-                }
-                if let Some(disabled_list) = settings.get("disabled").and_then(|v| v.as_array()) {
-                    for item in disabled_list {
-                        if let Some(name) = item.as_str() {
-                            disabled.insert(name.to_string());
-                            names.insert(name.to_string());
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    let mut rows: Vec<(String, bool)> = names
-        .into_iter()
-        .map(|name| {
-            let enabled_state = if disabled.contains(&name) {
-                false
-            } else if has_enabled_list {
-                enabled.contains(&name)
-            } else {
-                true
-            };
-            (name, enabled_state)
-        })
-        .collect();
-    rows.sort_by(|a, b| a.0.cmp(&b.0));
-    rows
-}
-
-#[cfg(not(test))]
-fn update_tool_state(config: &mut Config, name: &str, enable: bool) -> Result<bool> {
-    let tools = config
-        .tools
-        .get_or_insert_with(|| serde_json::Value::Object(Default::default()));
-    if !tools.is_object() {
-        *tools = serde_json::Value::Object(Default::default());
-    }
-    let tools_map = tools.as_object_mut().unwrap();
-    let settings = tools_map
-        .entry("settings".to_string())
-        .or_insert_with(|| serde_json::Value::Object(Default::default()));
-    if !settings.is_object() {
-        *settings = serde_json::Value::Object(Default::default());
-    }
-    let settings_map = settings.as_object_mut().unwrap();
-
-    let safe_mode = settings_map
-        .get("safe_mode")
-        .and_then(|v| v.as_bool())
-        .unwrap_or(false);
-
-    let enabled_present = settings_map.contains_key("enabled");
-    let mut enabled_list: Vec<String> = settings_map
-        .get("enabled")
-        .and_then(|value| value.as_array())
-        .map(|items| {
-            items
-                .iter()
-                .filter_map(|item| item.as_str().map(|s| s.to_string()))
-                .collect()
-        })
-        .unwrap_or_default();
-    let mut has_enabled_list = enabled_present;
-    if enabled_list.is_empty() && !safe_mode {
-        has_enabled_list = false;
-    }
-
-    let mut disabled_list: Vec<String> = settings_map
-        .get("disabled")
-        .and_then(|value| value.as_array())
-        .map(|items| {
-            items
-                .iter()
-                .filter_map(|item| item.as_str().map(|s| s.to_string()))
-                .collect()
-        })
-        .unwrap_or_default();
-
-    let mut changed = false;
-    if enable {
-        let before = disabled_list.len();
-        disabled_list.retain(|item| item != name);
-        if disabled_list.len() != before {
-            changed = true;
-        }
-
-        if (has_enabled_list || safe_mode) && !enabled_list.iter().any(|item| item == name) {
-            enabled_list.push(name.to_string());
-            changed = true;
-        }
-    } else {
-        if !disabled_list.iter().any(|item| item == name) {
-            disabled_list.push(name.to_string());
-            changed = true;
-        }
-        if has_enabled_list {
-            let before = enabled_list.len();
-            enabled_list.retain(|item| item != name);
-            if enabled_list.len() != before {
-                changed = true;
-            }
-        }
-    }
-
-    settings_map.insert(
-        "enabled".to_string(),
-        serde_json::Value::Array(
-            enabled_list
-                .into_iter()
-                .map(serde_json::Value::String)
-                .collect(),
-        ),
-    );
-    settings_map.insert(
-        "disabled".to_string(),
-        serde_json::Value::Array(
-            disabled_list
-                .into_iter()
-                .map(serde_json::Value::String)
-                .collect(),
-        ),
-    );
-
-    Ok(changed)
 }
 
 #[cfg(not(test))]
@@ -871,39 +691,9 @@ fn run_onboarding(db_path: &str) -> Result<()> {
             model: Some(model),
             base_url: Some(base_url),
         }),
-        agents: vec![AgentConfig {
-            name: "default_agent".to_string(),
-            description: Some("Butterfly, an expert conversationalist and assistant.".to_string()),
-            instructions:
-                r#"You are Butterfly, an expert conversationalist and calm, capable assistant.
-
-Core behavior:
-- Be warm, concise, and natural. Ask clarifying questions when the request is ambiguous.
-- Prefer actionable help over long explanations. Offer a short plan when helpful.
-- If you’re unsure, say so briefly and suggest the next best step.
-
-Tools you can use:
-- reminders: create/list/complete/delete/snooze reminders and todos.
-    Use it when the user asks for reminders, alarms, timers, tasks, or follow-ups.
-- search_internet: fetch up-to-date info when the user asks for current events or live data.
-
-Memory:
-- Use provided context, but do not treat assistant statements as user facts.
-- Confirm personal details before relying on them.
-
-When scheduling:
-- If the user asks “in X seconds/minutes/hours,” create a reminder with that delay.
-- If they ask “tomorrow at 3pm” or similar, ask for timezone if missing.
-"#
-                .to_string(),
-            specialization: "conversation".to_string(),
-            tools: Some(vec!["reminders".to_string(), "search_internet".to_string()]),
-            capture_name: None,
-            capture_schema: None,
-        }],
-        business: None,
+        skill_file: Some("./skill.md".to_string()),
+        heartbeat_file: Some("./heartbeat.md".to_string()),
         memory,
-        guardrails: None,
         tools: None,
         brains: None,
     };

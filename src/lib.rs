@@ -7,7 +7,6 @@ pub mod db;
 pub mod domains;
 pub mod error;
 pub mod factories;
-pub mod guardrails;
 pub mod interfaces;
 pub mod planning;
 pub mod plugins;

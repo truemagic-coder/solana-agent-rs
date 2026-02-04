@@ -99,7 +99,7 @@ async fn summarization_inserts_memory() {
     let summarizer = Arc::new(SummarizerMock);
     let mut config = SqliteMemoryProviderConfig::new(db_path.to_str().unwrap());
     config.summarizer = Some(summarizer);
-    config.summary_threshold = Some(2);
+    config.summary_threshold = Some(999);
     let provider = SqliteMemoryProvider::new(config).await.unwrap();
 
     provider
@@ -110,6 +110,8 @@ async fn summarization_inserts_memory() {
         .append_message("u1", "assistant", "Noted")
         .await
         .unwrap();
+
+    provider.summarize_now("u1").await.unwrap();
 
     let results = provider.search("u1", "ButterFly Bot", 5).await.unwrap();
     assert!(!results.is_empty());

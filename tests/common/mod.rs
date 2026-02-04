@@ -10,7 +10,6 @@ use butterfly_bot::error::{ButterflyBotError, Result};
 use butterfly_bot::interfaces::plugins::Plugin;
 use butterfly_bot::interfaces::plugins::Tool;
 use butterfly_bot::interfaces::providers::{ChatEvent, ImageInput, LlmProvider, LlmResponse};
-use butterfly_bot::interfaces::services::RoutingService as RoutingServiceTrait;
 use butterfly_bot::plugins::registry::ToolRegistry;
 
 pub struct QueueLlmProvider {
@@ -117,15 +116,6 @@ impl LlmProvider for QueueLlmProvider {
 
     async fn embed(&self, _inputs: Vec<String>, _model: Option<&str>) -> Result<Vec<Vec<f32>>> {
         Ok(vec![vec![0.0, 1.0]])
-    }
-}
-
-pub struct DummyRouter;
-
-#[async_trait]
-impl RoutingServiceTrait for DummyRouter {
-    async fn route_query(&self, _query: &str) -> Result<String> {
-        Ok("router_agent".to_string())
     }
 }
 

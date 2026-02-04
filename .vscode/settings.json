@@ -13,5 +13,9 @@
     "ruff.organizeImports": true,
     "python.testing.pytestArgs": [
         "tests"
-    ]
+    ],
+    "chat.tools.terminal.autoApprove": {
+        "cargo check": true,
+        "cargo coverage": true
+    }
 }

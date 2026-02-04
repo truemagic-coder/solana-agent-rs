@@ -1,21 +1,22 @@
 ## Butterfly Bot
 
-`Butterfly Bot` is your personal AI assistant accessible via a native desktop app. It includes memory, tool integrations, easy configuration, and streaming responses in a polished UI. The codebase still exposes a Rust library for building bots, but the primary focus is the app experience.
+`Butterfly Bot` is your personal AI assistant accessible via a native desktop app. It includes memory, tool integrations, a skill/heartbeat system, easy configuration, and streaming responses in a polished UI. The codebase still exposes a Rust library for building bots, but the primary focus is the app experience.
 
 ## Highlights
 
 - Modern desktop UI (Dioxus) with streaming chat using local Ollama models or OpenAI compatible providers.
 - Reminders and notifications both in chat and OS notifications.
 - Optional long-term memory (temporal knowledge graph) using embedded local storage of SQLCipher and LanceDB.
-- Agent tool integrations with live UI events.
-- Config and secrets managed from the config screen via JSON and stored in OS keyring.
+- Skill and heartbeat Markdown files that define the assistant’s identity and ongoing guidance.
+- Agent tool integrations with live UI events (tools are always on by default).
+- Config and secrets managed from the config screen via JSON and stored in OS keychain for the best security.
 
 ## Privacy & Security & Always On
 
 - Run locally with Ollama to keep requests and model inference private on your machine.
 - Designed for always-on use with unlimited token use (local inference) and customized wakeup and task intervals.
 - Conversation data and memory are only stored locally.
-- Config JSON is stored in the OS keychain GNOME Keyring/Secret Service.
+- Config JSON is stored in the OS keychain.
 - SQLite data is encrypted at rest via SQLCipher when a DB key is set.
 
 ## Ollama
@@ -30,7 +31,7 @@
 
 ### Models Used
 
-- ministral-3:14b (agent/router)
+- ministral-3:14b (assistant + summaries)
 - embeddinggemma:latest (embedding)
 - qllama/bge-reranker-v2-m3 (reranking)
 
@@ -50,7 +51,7 @@
 
 - Rust 1.93 or newer
 - Certain system libraries for the host OS
-- Mac or Linux or Windows
+- Mac or Linux or Windows (WSL)
 
 ### Model Recommendations
 
@@ -70,9 +71,49 @@ cargo run --release --bin butterfly-bot
 
 ## Config
 
-Use the Config tab in the app to configure all settings via JSON.
+Use the Config tab in the app to configure all settings via JSON. The config no longer includes an `agent` section — the assistant identity and behavior come from the skill Markdown.
 
-Config is stored in the OS keyring for top security and safety.
+Config is stored in the OS keychain for top security and safety.
+
+### Skill & Heartbeat
+
+- `skill_file` is a Markdown file (local path or URL) that defines the assistant’s identity, style, and rules.
+- `heartbeat_file` is optional Markdown (local path or URL) that is appended to the system prompt for ongoing guidance.
+- The heartbeat file is reloaded on every wakeup tick (using `tools.wakeup.poll_seconds`) so changes take effect without a restart.
+
+### Minimal config example (Ollama defaults)
+
+```json
+{
+    "openai": {
+        "api_key": null,
+        "model": "ministral-3:14b",
+        "base_url": "http://localhost:11434/v1"
+    },
+    "skill_file": "./skill.md",
+    "heartbeat_file": "./heartbeat.md",
+    "memory": {
+        "enabled": true,
+        "sqlite_path": "./data/butterfly-bot.db",
+        "lancedb_path": "./data/lancedb",
+        "summary_model": "ministral-3:14b",
+        "embedding_model": "embeddinggemma:latest",
+        "rerank_model": "qllama/bge-reranker-v2-m3",
+        "summary_threshold": null,
+        "retention_days": null
+    },
+    "tools": {
+        "settings": {
+            "audit_log_path": "./data/tool_audit.log"
+        }
+    },
+    "brains": {
+        "settings": {
+            "tick_seconds": 60
+        }
+    }
+}
+```
 
 ## SQLCipher (encrypted storage)
 
@@ -172,7 +213,7 @@ Configure the internet search tool under `tools.search_internet`:
 
 ### Wakeup Tool
 
-The wakeup tool wakes up the agent to perform tasks on an interval - in someother agents it is called a `heartbeat`.
+The wakeup tool runs scheduled tasks on an interval.
 
 Wakeup runs are also streamed to the UI event feed as tool messages.
 

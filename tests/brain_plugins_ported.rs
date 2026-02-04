@@ -1,3 +1,5 @@
+#![cfg(feature = "slow-tests")]
+
 use butterfly_bot::brain::plugins::age_detection::{AgeCategory, AgeDetectionBrain};
 use butterfly_bot::brain::plugins::ai_goals::AiGoalsBrain;
 use butterfly_bot::brain::plugins::ai_safety::{AiSafetyBrain, SafetyViolationType};

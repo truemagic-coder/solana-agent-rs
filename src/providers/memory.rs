@@ -115,35 +115,6 @@ impl MemoryProvider for InMemoryMemoryProvider {
         Ok(results.len() as u64)
     }
 
-    async fn save_capture(
-        &self,
-        user_id: &str,
-        capture_name: &str,
-        agent_name: Option<&str>,
-        data: serde_json::Value,
-        schema: Option<serde_json::Value>,
-    ) -> Result<Option<String>> {
-        let mut doc = serde_json::json!({
-            "user_id": user_id,
-            "capture_name": capture_name,
-            "data": data,
-            "timestamp": SystemTime::now()
-                .duration_since(UNIX_EPOCH)
-                .map_err(|e| ButterflyBotError::Runtime(e.to_string()))?
-                .as_secs() as i64,
-        });
-        if let Some(agent) = agent_name {
-            doc["agent_name"] = serde_json::Value::String(agent.to_string());
-        }
-        if let Some(schema) = schema {
-            doc["schema"] = schema;
-        }
-
-        let mut guard = self.collections.write().await;
-        guard.entry("captures".to_string()).or_default().push(doc);
-        Ok(None)
-    }
-
     async fn search(&self, _user_id: &str, _query: &str, _limit: usize) -> Result<Vec<String>> {
         Ok(Vec::new())
     }
