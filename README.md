@@ -11,6 +11,87 @@
 - Agent tool integrations with live UI events (tools are always on by default).
 - Config and secrets managed from the config screen via JSON and stored in OS keychain for the best security.
 
+## Architecture (Daemon + UI + Always-On Agent)
+
+```
+        ┌──────────────────────────────────────┐
+        │           Desktop UI (Dioxus)        │
+        │  - chat, config, notifications       │
+        │  - streams tool + agent events       │
+        └───────────────┬──────────────────────┘
+                │ IPC / local client
+                v
+            ┌──────────────────────────────┐
+            │      butterfly-botd          │
+            │        (daemon)              │
+            │  - always-on scheduler       │
+            │  - tools + wakeups           │
+            │  - memory + planning         │
+            └──────────────┬───────────────┘
+                   │
+         ┌─────────────────┼─────────────────┐
+         v                 v                 v
+    ┌────────────────┐  ┌───────────────┐  ┌──────────────────┐
+    │  Memory System │  │ Tooling Layer │  │  Model Provider  │
+    │ (SQLCipher +   │  │ (MCP, HTTP,   │  │ (Ollama/OpenAI)  │
+    │  LanceDB)      │  │ reminders,    │  │                  │
+    │                │  │ tasks, etc.)  │  │                  │
+    └────────────────┘  └───────────────┘  └──────────────────┘
+```
+
+### How this enables an always-on agent
+
+- The agent is always-on only while the daemon is running. The daemon owns the scheduler, wakeups, and tool execution.
+- If the UI shuts down and the daemon is also stopped, the agent will pause until the daemon is started again.
+- Persistent memory and task queues live in the daemon’s storage, preserving context across restarts and long idle periods.
+
+## Memory System (Diagram + Rationale)
+
+```
+                    ┌───────────────────────────────┐
+                    │         Conversation          │
+                    │  (raw turns + metadata)       │
+                    └───────────────┬───────────────┘
+                                    │
+                                    v
+                   ┌────────────────────────────────┐
+                   │     Event + Signal Extractor   │
+                   │ (facts, prefs, tasks, entities)│
+                   └───────────────┬────────────────┘
+                                   │
+                     ┌─────────────┴─────────────┐
+                     │                           │
+                     v                           v
+        ┌──────────────────────────┐   ┌──────────────────────────┐
+        │  Temporal SQLCipher DB   │   │      LanceDB Vectors     │
+        │  (structured memories)   │   │ (embeddings + rerank)    │
+        └─────────────┬────────────┘   └─────────────┬────────────┘
+                      │                              │
+                      v                              v
+        ┌──────────────────────────┐   ┌──────────────────────────┐
+        │   Memory Summarizer      │   │  Semantic Recall + Rank  │
+        │ (compression + pruning)  │   │ (query-time retrieval)   │
+        └─────────────┬────────────┘   └─────────────┬────────────┘
+                      └──────────────┬───────────────┘
+                                     v
+                        ┌────────────────────────┐
+                        │   Context Assembler    │
+                        │ (chat + tools + agent) │
+                        └────────────────────────┘
+```
+
+### Temporal knowledge graph (what “temporal” means here)
+
+Memory entries are stored as time-ordered events and entities in the SQLCipher database. Each fact, preference, reminder, and decision is recorded with timestamps and relationships, so recall can answer questions like “when did we decide this?” or “what changed since last week?” without relying on lossy summaries. This timeline-first structure is what makes the memory system a temporal knowledge graph rather than a static summary.
+
+### Why this beats “just summarization” or QMD
+
+- Summaries alone lose details. The system stores structured facts in SQLCipher and semantic traces in LanceDB so exact preferences, dates, and decisions remain queryable even after summarization.
+- QMD-style recall can miss context. Dual storage (structured + vectors) plus reranking yields higher recall and fewer false positives.
+- Temporal memory matters. The DB keeps time-ordered events so the assistant can answer “when did we decide X?” without relying on brittle summary phrasing.
+- Safer pruning. Summarization is used for compression, not replacement, so older context is condensed while retaining anchors for precise retrieval.
+- Faster, cheaper queries. Quick structured lookups handle facts and tasks; semantic search handles fuzzy recall, keeping prompts smaller and more relevant.
+
 ## Privacy & Security & Always On
 
 - Run locally with Ollama to keep requests and model inference private on your machine.
