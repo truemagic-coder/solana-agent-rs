@@ -125,7 +125,7 @@ Memory entries are stored as time-ordered events and entities in the SQLCipher d
 
 - AMD Threadripper 2950X with 128GB DDR4 with AMD 7900XTX on Ubuntu 24.04.3
 - MSI Raider GE68-HX-14V on Ubuntu 24.04.3
-- Both provides instant results for Ollama chatting with memory
+- Both provide instant results for Ollama chatting with memory
 
 ## OpenAI 
 
