@@ -337,6 +337,9 @@ async fn main() -> Result<()> {
             std::env::set_var("BUTTERFLY_BOT_TOKEN", token);
         }
         std::env::set_var("BUTTERFLY_BOT_USER_ID", &cli.user_id);
+        if let Ok(config) = Config::from_store(&cli.db) {
+            ensure_ollama_models(&config)?;
+        }
         ui::launch_ui();
         return Ok(());
     }
@@ -812,6 +815,11 @@ fn ensure_ollama_models(config: &Config) -> Result<()> {
     let installed = list_ollama_models()?;
     for model in required {
         if !installed.iter().any(|name| name == &model) {
+            println!(
+                "{} {}",
+                style("⏳").color256(214),
+                style(format!("Loading Ollama model '{model}'...")).color256(245)
+            );
             pull_ollama_model(&model)?;
         }
     }

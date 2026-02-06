@@ -117,7 +117,7 @@ Memory entries are stored as time-ordered events and entities in the SQLCipher d
 - qllama/bge-reranker-v2-m3 (reranking)
 
 ### Model Notes
-- Models are required to be pulled manually using `ollama pull` before `butterfly-bot` will work with them.
+- When using a local Ollama base URL, `butterfly-bot` will automatically pull missing models on startup and let you know while they load.
 - Ollama models can be overriden and other models can be used rather than the default ones.
 - Very beefy Macs like a max speced Mini or Studio could also run the Ollama setup (not tested)
 
