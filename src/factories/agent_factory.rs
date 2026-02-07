@@ -73,6 +73,8 @@ use crate::reminders::{default_reminder_db_path, resolve_reminder_db_path, Remin
 use crate::services::agent::{AgentService, UiEvent};
 use crate::services::query::QueryService;
 use crate::tools::http_call::HttpCallTool;
+use crate::tools::coding::CodingTool;
+use crate::tools::github::GitHubTool;
 use crate::tools::mcp::McpTool;
 use crate::tools::planning::PlanningTool;
 use crate::tools::reminders::RemindersTool;
@@ -318,6 +320,18 @@ impl ButterflyBotFactory {
         tool.configure(&config_value)?;
         if tool_registry.register_tool(tool).await {
             registered_tools.push("mcp".to_string());
+        }
+
+        let tool: Arc<dyn Tool> = Arc::new(GitHubTool::new());
+        tool.configure(&config_value)?;
+        if tool_registry.register_tool(tool).await {
+            registered_tools.push("github".to_string());
+        }
+
+        let tool: Arc<dyn Tool> = Arc::new(CodingTool::new());
+        tool.configure(&config_value)?;
+        if tool_registry.register_tool(tool).await {
+            registered_tools.push("coding".to_string());
         }
 
         let tool: Arc<dyn Tool> = Arc::new(WakeupTool::new());

@@ -20,6 +20,16 @@
     "settings": {
       "audit_log_path": "./data/tool_audit.log"
     },
+    "github": {
+      "pat": null,
+      "url": "https://api.githubcopilot.com/mcp/",
+      "type": "http"
+    },
+    "coding": {
+      "api_key": null,
+      "model": "gpt-5.2-codex",
+      "base_url": "https://api.openai.com/v1"
+    },
     "reminders": {
       "sqlite_path": "./data/butterfly-bot.db"
     },

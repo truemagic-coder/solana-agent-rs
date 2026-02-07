@@ -1,4 +1,6 @@
 pub mod http_call;
+pub mod github;
+pub mod coding;
 pub mod mcp;
 pub mod planning;
 pub mod reminders;

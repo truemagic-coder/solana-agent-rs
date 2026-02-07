@@ -41,6 +41,10 @@ use butterfly_bot::plugins::registry::ToolRegistry;
 #[cfg(not(test))]
 use butterfly_bot::tools::http_call::HttpCallTool;
 #[cfg(not(test))]
+use butterfly_bot::tools::coding::CodingTool;
+#[cfg(not(test))]
+use butterfly_bot::tools::github::GitHubTool;
+#[cfg(not(test))]
 use butterfly_bot::tools::mcp::McpTool;
 #[cfg(not(test))]
 use butterfly_bot::tools::planning::PlanningTool;
@@ -546,6 +550,14 @@ async fn ensure_tool_secrets(db_path: &str) -> Result<()> {
     tool.configure(&config_value)?;
     let _ = registry.register_tool(tool).await;
 
+    let tool: std::sync::Arc<dyn Tool> = std::sync::Arc::new(GitHubTool::new());
+    tool.configure(&config_value)?;
+    let _ = registry.register_tool(tool).await;
+
+    let tool: std::sync::Arc<dyn Tool> = std::sync::Arc::new(CodingTool::new());
+    tool.configure(&config_value)?;
+    let _ = registry.register_tool(tool).await;
+
     let tool: std::sync::Arc<dyn Tool> = std::sync::Arc::new(WakeupTool::new());
     tool.configure(&config_value)?;
     let _ = registry.register_tool(tool).await;
@@ -571,6 +583,8 @@ async fn ensure_tool_secrets(db_path: &str) -> Result<()> {
         "search_internet",
         "reminders",
         "mcp",
+        "github",
+        "coding",
         "wakeup",
         "http_call",
         "todo",

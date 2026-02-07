@@ -304,6 +304,50 @@ HTTP (streamable) example:
 }
 ```
 
+### GitHub Tool (MCP wrapper)
+
+Use the built-in GitHub tool to call GitHub MCP tools with a single PAT. This tool uses MCP under the hood, so you don't need to define MCP servers directly if you don't want to.
+
+Config fields:
+- `tools.github.pat` (optional; can also come from vault secret `github_pat`)
+- `tools.github.url` (optional; defaults to `https://api.githubcopilot.com/mcp/`)
+- `tools.github.type` (optional; defaults to `http`)
+- `tools.github.headers` (optional; additional headers)
+
+```json
+{
+        "tools": {
+        "github": {
+            "pat": "YOUR_GITHUB_PAT",
+            "url": "https://api.githubcopilot.com/mcp/",
+            "type": "http"
+        }
+    }
+}
+```
+
+### Coding Tool (Codex)
+
+Use a dedicated coding model for Solana backend and Solana smart contract work without changing the main runtime model.
+
+Config fields:
+- `tools.coding.api_key` (optional; can also come from vault secret `coding_openai_api_key`)
+- `tools.coding.model` (optional; defaults to `gpt-5.2-codex`)
+- `tools.coding.base_url` (optional; defaults to `https://api.openai.com/v1`)
+- `tools.coding.system_prompt` (optional; overrides default coding system prompt)
+
+```json
+{
+    "tools": {
+        "coding": {
+            "api_key": "YOUR_OPENAI_KEY",
+            "model": "gpt-5.2-codex",
+            "base_url": "https://api.openai.com/v1"
+        }
+    }
+}
+```
+
 ### Internet Search Tool
 
 The Internet Search tool supports 3 different providers: `openai`, `grok`, and `perplexity`.
