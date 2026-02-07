@@ -111,7 +111,7 @@ Memory entries are stored as time-ordered events and entities in the SQLCipher d
 
 - Rust 1.93 or newer
 - 16GB+ of RAM 
-- Linux (Ubuntu recommended) or Mac
+- Linux (Ubuntu recommended) or Mac or Windows (WSL)
 - Certain system libraries for Linux
 - 8GB+ of VRAM
 
@@ -124,13 +124,13 @@ Memory entries are stored as time-ordered events and entities in the SQLCipher d
 ### Model Notes
 - When using a local Ollama base URL, `butterfly-bot` will automatically pull missing models on startup and let you know while they load.
 - Ollama models can be overriden and other models can be used rather than the default ones.
-- Very beefy Macs like a max speced Mini or Studio could also run the Ollama setup (not tested)
 
 ### Test Systems
 
 - AMD Threadripper 2950X with 128GB DDR4 with AMD 7900XTX on Ubuntu 24.04.3
 - MSI Raider GE68-HX-14V on Ubuntu 24.04.3
 - Both provide instant results for Ollama chatting with memory
+- Not tested yet on Mac or Windows (WSL)
 
 ## OpenAI 
 
