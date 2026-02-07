@@ -100,6 +100,11 @@ Memory entries are stored as time-ordered events and entities in the SQLCipher d
 - Config JSON is stored in the OS keychain.
 - SQLite data is encrypted at rest via SQLCipher when a DB key is set.
 
+## Install Prerequisites
+
+- Rust (via rustup): https://rustup.rs
+- Ollama (platform-specific installers): https://ollama.com/download
+
 ## Ollama
 
 ### Requirements
