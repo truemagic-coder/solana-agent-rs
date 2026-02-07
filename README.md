@@ -105,8 +105,8 @@ Memory entries are stored as time-ordered events and entities in the SQLCipher d
 ### Requirements
 
 - Rust 1.93 or newer
-- 32GB+ of RAM 
-- Linux (Ubuntu recommended)
+- 16GB+ of RAM 
+- Linux (Ubuntu recommended) or Mac
 - Certain system libraries for Linux
 - 8GB+ of VRAM
 
@@ -163,7 +163,7 @@ Config is stored in the OS keychain for top security and safety.
 - `heartbeat_file` is optional Markdown (local path or URL) that is appended to the system prompt for ongoing guidance.
 - The heartbeat file is reloaded on every wakeup tick (using `tools.wakeup.poll_seconds`) so changes take effect without a restart.
 
-### Minimal config example (Ollama defaults)
+### Full config.json
 
 ```json
 {
@@ -187,6 +187,25 @@ Config is stored in the OS keychain for top security and safety.
     "tools": {
         "settings": {
             "audit_log_path": "./data/tool_audit.log"
+        },
+        "reminders": {
+            "sqlite_path": "./data/butterfly-bot.db"
+        },
+        "wakeup": {
+            "poll_seconds": 60,
+            "sqlite_path": "./data/butterfly-bot.db",
+            "audit_log_path": "./data/wakeup_audit.log"
+        },
+        "todo": {
+            "sqlite_path": "./data/butterfly-bot.db"
+        },
+        "planning": {
+            "sqlite_path": "./data/butterfly-bot.db"
+        },
+        "tasks": {
+            "poll_seconds": 60,
+            "audit_log_path": "./data/tasks_audit.log",
+            "sqlite_path": "./data/butterfly-bot.db"
         }
     },
     "brains": {
@@ -228,6 +247,13 @@ There are many high-quality MCP server providers like:
 * [GitHub](https://github.com) - Coding
 
 Configure MCP servers under `tools.mcp.servers` (supports `type`: `sse` or `http`):
+
+Config fields:
+- `tools.mcp.servers` (required to use MCP)
+    - `name` (required)
+    - `url` (required)
+    - `type` (optional, defaults to `sse`; supports `sse`, `http`, or `streamable-http`)
+    - `headers` (optional)
 
 ```json
 {
@@ -275,6 +301,18 @@ The Internet Search tool supports 3 different providers: `openai`, `grok`, and `
 
 Configure the internet search tool under `tools.search_internet`:
 
+Config fields:
+- `api_key` (optional; can also come from vault secrets or `openai.api_key`)
+- `provider` (optional; defaults to `openai`)
+- `model` (optional; defaults by provider)
+- `citations` (optional; defaults to `true`)
+- `grok_web_search` (optional; defaults to `true`)
+- `grok_x_search` (optional; defaults to `true`)
+- `grok_timeout` (optional; defaults to `90`)
+- `permissions.network_allow` (optional allowlist for outbound domains)
+- `permissions.default_deny` (optional; defaults to `false`)
+- `tools.settings.permissions.*` (optional global defaults; tool-level `permissions` can override `network_allow`)
+
 ```json
 {
     "tools": {
@@ -286,8 +324,10 @@ Configure the internet search tool under `tools.search_internet`:
             "grok_web_search": true,
             "grok_x_search": true,
             "grok_timeout": 90,
-            "network_allow": ["api.openai.com"],
-            "default_deny": false
+            "permissions": {
+                "network_allow": ["api.openai.com"],
+                "default_deny": false
+            }
         }
     }
 }
@@ -300,6 +340,11 @@ The wakeup tool runs scheduled tasks on an interval.
 Wakeup runs are also streamed to the UI event feed as tool messages.
 
 Create recurring agent tasks with `tools.wakeup`, control polling, and log runs to an audit file:
+
+Config fields:
+- `poll_seconds` (optional; defaults to `60`)
+- `sqlite_path` (optional; defaults to `./data/butterfly-bot.db`)
+- `audit_log_path` (optional; defaults to `./data/wakeup_audit.log`)
 
 ```json
 {
@@ -320,6 +365,11 @@ Endpoints can be discovered by the agent or provided in the system/user prompts.
 
 Call external APIs with arbitrary HTTP requests and custom headers. Configure defaults under `tools.http_call`:
 
+Config fields:
+- `base_url` (optional)
+- `default_headers` (optional)
+- `timeout_seconds` (optional; defaults to `60`)
+
 ```json
 {
     "tools": {
@@ -338,6 +388,9 @@ Call external APIs with arbitrary HTTP requests and custom headers. Configure de
 
 Ordered todo list backed by SQLite for the agent to created todo lists:
 
+Config fields:
+- `sqlite_path` (optional; defaults to `./data/butterfly-bot.db`)
+
 ```json
 {
     "tools": {
@@ -352,6 +405,9 @@ Ordered todo list backed by SQLite for the agent to created todo lists:
 
 Structured plans with goals and steps for the agent to create plans:
 
+Config fields:
+- `sqlite_path` (optional; defaults to `./data/butterfly-bot.db`)
+
 ```json
 {
     "tools": {
@@ -365,6 +421,11 @@ Structured plans with goals and steps for the agent to create plans:
 ### Tasks Tool
 
 Schedule one-off or recurring tasks with cancellation support for the agent to create tasks:
+
+Config fields:
+- `poll_seconds` (optional; defaults to `60`)
+- `audit_log_path` (optional; defaults to `./data/tasks_audit.log`)
+- `sqlite_path` (optional; defaults to `./data/butterfly-bot.db`)
 
 ```json
 {
@@ -383,6 +444,9 @@ Schedule one-off or recurring tasks with cancellation support for the agent to c
 The reminders tool is for users to create reminders for themselves or for the agent to create reminders for the user.
 
 Create, list, complete, delete, and snooze reminders. Configure storage under `tools.reminders` (falls back to `memory.sqlite_path` if omitted):
+
+Config fields:
+- `sqlite_path` (optional; defaults to `./data/butterfly-bot.db` and falls back to `memory.sqlite_path` when set)
 
 ```json
 {

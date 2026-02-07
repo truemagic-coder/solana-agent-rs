@@ -135,6 +135,15 @@ pub fn launch_ui() {
     launch(app_view);
 }
 
+fn stream_timeout_duration() -> Duration {
+    let default_secs = 180u64;
+    let value = std::env::var("BUTTERFLY_BOT_STREAM_TIMEOUT_SECONDS")
+        .ok()
+        .and_then(|v| v.trim().parse::<u64>().ok())
+        .filter(|v| *v > 0);
+    Duration::from_secs(value.unwrap_or(default_secs))
+}
+
 #[cfg(target_os = "linux")]
 fn force_dbusrs() {
     if std::env::var("DBUSRS").is_err() {
@@ -325,7 +334,7 @@ fn app_view() -> Element {
                             let mut stream = response.bytes_stream();
                             loop {
                                 let next_chunk =
-                                    match timeout(Duration::from_secs(45), stream.next()).await {
+                                    match timeout(stream_timeout_duration(), stream.next()).await {
                                         Ok(value) => value,
                                         Err(_) => {
                                             error.set(
@@ -380,7 +389,7 @@ fn app_view() -> Element {
                                     let mut stream = response.bytes_stream();
                                     loop {
                                         let next_chunk =
-                                            match timeout(Duration::from_secs(45), stream.next())
+                                            match timeout(stream_timeout_duration(), stream.next())
                                                 .await
                                             {
                                                 Ok(value) => value,

@@ -58,11 +58,20 @@ impl Tool for TodoTool {
             "properties": {
                 "action": {
                     "type": "string",
-                    "enum": ["create", "list", "complete", "reopen", "delete", "reorder"]
+                    "enum": ["create", "list", "complete", "reopen", "delete", "reorder", "create_many"]
                 },
                 "user_id": { "type": "string" },
                 "title": { "type": "string" },
                 "notes": { "type": "string" },
+                "items": {
+                    "type": "array",
+                    "items": {
+                        "oneOf": [
+                            {"type": "string"},
+                            {"type": "object", "properties": {"title": {"type": "string"}, "notes": {"type": "string"}}}
+                        ]
+                    }
+                },
                 "status": { "type": "string", "enum": ["open", "completed", "all"] },
                 "limit": { "type": "integer" },
                 "id": { "type": "integer" },
@@ -88,6 +97,13 @@ impl Tool for TodoTool {
             .and_then(|v| v.as_str())
             .unwrap_or("")
             .to_string();
+        let action = match action.as_str() {
+            "add" | "new" => "create",
+            "create_list" | "create_many" | "add_many" | "bulk_create" | "create_items" => {
+                "create_many"
+            }
+            other => other,
+        };
         let user_id = params
             .get("user_id")
             .and_then(|v| v.as_str())
@@ -96,7 +112,7 @@ impl Tool for TodoTool {
         let store = self.get_store().await?;
         let limit = params.get("limit").and_then(|v| v.as_u64()).unwrap_or(50) as usize;
 
-        match action.as_str() {
+        match action {
             "create" => {
                 let title = params
                     .get("title")
@@ -105,6 +121,41 @@ impl Tool for TodoTool {
                 let notes = params.get("notes").and_then(|v| v.as_str());
                 let item = store.create_item(user_id, title, notes).await?;
                 Ok(json!({"status": "ok", "item": item}))
+            }
+            "create_many" => {
+                let items = params
+                    .get("items")
+                    .and_then(|v| v.as_array())
+                    .ok_or_else(|| ButterflyBotError::Runtime("Missing items".to_string()))?;
+                if items.is_empty() {
+                    return Err(ButterflyBotError::Runtime("items empty".to_string()));
+                }
+                let mut created = Vec::new();
+                for item in items {
+                    match item {
+                        Value::String(title) => {
+                            let created_item = store.create_item(user_id, title, None).await?;
+                            created.push(created_item);
+                        }
+                        Value::Object(map) => {
+                            let title = map
+                                .get("title")
+                                .and_then(|v| v.as_str())
+                                .ok_or_else(|| {
+                                    ButterflyBotError::Runtime("Missing item title".to_string())
+                                })?;
+                            let notes = map.get("notes").and_then(|v| v.as_str());
+                            let created_item = store.create_item(user_id, title, notes).await?;
+                            created.push(created_item);
+                        }
+                        _ => {
+                            return Err(ButterflyBotError::Runtime(
+                                "Invalid item format".to_string(),
+                            ))
+                        }
+                    }
+                }
+                Ok(json!({"status": "ok", "items": created}))
             }
             "list" => {
                 let status = TodoStatus::from_option(params.get("status").and_then(|v| v.as_str()));
